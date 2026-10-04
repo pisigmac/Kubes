@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local sqlite & computer workspace
+/data
+
+# IDE and assistant configuration
+.cursor/
+.vscode/
+.idea/
+CLAUDE.md
+AGENTS.md
+
+# Planning docs
+plan.md
+future_plan.md
