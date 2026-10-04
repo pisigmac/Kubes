@@ -165,7 +165,7 @@ npx tsc --noEmit
 npm run lint
 ```
 
-For a comprehensive technical audit and quality report, see [DOCUMENTATION.md](DOCUMENTATION.md) and [QUALITY_REVIEW.md](QUALITY_REVIEW.md).
+For comprehensive technical documentation and system behavior, see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ---
 
