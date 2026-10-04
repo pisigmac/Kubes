@@ -46,6 +46,7 @@ def cmd_allocate(args) -> None:
             host=args.host,
             url=args.url,
             metadata=meta,
+            pid=getattr(args, "pid", None),
         )
         print(port)
     except Exception as e:
@@ -128,6 +129,7 @@ def create_parser() -> argparse.ArgumentParser:
     p_alloc.add_argument("--range", "-r", help="Port range scan (e.g. 8000-8050)")
     p_alloc.add_argument("--host", default="127.0.0.1", help="Host interface (default 127.0.0.1)")
     p_alloc.add_argument("--url", help="Optional health / service URL")
+    p_alloc.add_argument("--pid", type=int, help="Process ID owning this port lease")
     p_alloc.add_argument("--meta", help="Optional JSON or text metadata")
     p_alloc.set_defaults(func=cmd_allocate)
 

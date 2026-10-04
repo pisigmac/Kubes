@@ -43,6 +43,9 @@ else
   echo "▶ Starting Python Agent Core (port ${AGENT_CORE_PORT})..."
   (cd "${ROOT_DIR}/services/agent-core" && uv run uvicorn main:app --host 127.0.0.1 --port "${AGENT_CORE_PORT}" > "${LOG_DIR}/agent-core.log" 2>&1 & echo $! > "${PID_DIR}/agent-core.pid")
   sleep 1
+  if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/agent-core.pid" ]]; then
+    "${PORT_ALLOC_BIN}" allocate --service "kubes-agent-core" --preferred "${AGENT_CORE_PORT}" --pid "$(cat "${PID_DIR}/agent-core.pid")" >/dev/null 2>&1 || true
+  fi
 fi
 
 # 2. Start Next.js Web Server
@@ -52,6 +55,9 @@ else
   echo "▶ Starting Next.js Web App (port ${WEB_PORT})..."
   (cd "${ROOT_DIR}" && PORT="${WEB_PORT}" AGENT_CORE_URL="http://127.0.0.1:${AGENT_CORE_PORT}" pnpm dev -p "${WEB_PORT}" > "${LOG_DIR}/web.log" 2>&1 & echo $! > "${PID_DIR}/web.pid")
   sleep 1
+  if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/web.pid" ]]; then
+    "${PORT_ALLOC_BIN}" allocate --service "kubes-web" --preferred "${WEB_PORT}" --pid "$(cat "${PID_DIR}/web.pid")" >/dev/null 2>&1 || true
+  fi
 fi
 
 # 3. Start Scheduler Daemon

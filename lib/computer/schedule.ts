@@ -3,7 +3,7 @@ import { claimRow, parseCron, nextCron } from "./cron.ts";
 import { db } from "../db.ts";
 import { isCubeBusy } from "../cubes/busy.ts";
 import { runCubeInstruction } from "../cubes/runtime.ts";
-import { createThread, getCube, getMessages, getThread, saveThreadMessages } from "../cubes/store.ts";
+import { getCube, getMessages, latestThread, saveThreadMessages } from "../cubes/store.ts";
 
 
 export type Schedule = {
@@ -159,14 +159,13 @@ async function runClaimed(row: ScheduleRow): Promise<void> {
     finish(row.id, "error", "Cube not found.", null);
     return;
   }
-  const thread = row.thread_id ? getThread(row.thread_id) : undefined;
-  const chat = thread ?? createThread(cube.id);
+  const chat = latestThread(cube.id);
   const user: UIMessage = {
     id: crypto.randomUUID(),
     role: "user",
-    parts: [{ type: "text", text: row.instruction }],
+    parts: [{ type: "text", text: `⏰ [Scheduled Task]\n${row.instruction}` }],
   };
-  const prior = thread ? getMessages(chat.id) : [];
+  const prior = getMessages(chat.id);
   saveThreadMessages(chat.id, [...prior, user]);
   db().prepare("UPDATE schedules SET thread_id = ? WHERE id = ?").run(chat.id, row.id);
   try {
@@ -180,6 +179,12 @@ async function runClaimed(row: ScheduleRow): Promise<void> {
     finish(row.id, "ok", null, new Date().toISOString());
   } catch (error) {
     const message = error instanceof Error ? error.message : "The schedule failed.";
+    const assistant: UIMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      parts: [{ type: "text", text: `⚠️ Scheduled task failed: ${message}` }],
+    };
+    saveThreadMessages(chat.id, [...prior, user, assistant]);
     finish(row.id, "error", message, new Date().toISOString());
   }
 }

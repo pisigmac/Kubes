@@ -12,7 +12,8 @@
     "start:all": "bash scripts/start-all.sh",
     "stop:all": "bash scripts/stop-all.sh",
     "status": "bash scripts/status.sh",
-    "verify": "bash scripts/verify.sh"
+    "verify": "bash scripts/verify.sh",
+    "test:ui": "node --experimental-strip-types scripts/test-ui-play.ts"
   },
 
   "dependencies": {
