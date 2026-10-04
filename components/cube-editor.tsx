@@ -88,7 +88,7 @@ export function CubeEditor({
   }
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col overflow-x-hidden border-white/10 bg-[#101012] md:w-[340px] md:max-w-[340px] md:border-l">
+    <aside className="flex h-full w-full min-w-0 flex-col overflow-x-hidden border-white/10 bg-[#101012] lg:w-[340px] lg:max-w-[340px] lg:border-l">
       <div className="flex items-center justify-between px-4 py-4">
         <div>
           <p className="text-xs tracking-[0.16em] text-white/40 uppercase">
@@ -99,7 +99,7 @@ export function CubeEditor({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full px-2 py-1 text-sm text-white/60 hover:bg-white/5 hover:text-white md:hidden"
+          className="rounded-full px-2 py-1 text-sm text-white/60 hover:bg-white/5 hover:text-white lg:hidden"
         >
           Close
         </button>

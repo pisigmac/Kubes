@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "port-allocator"
+version = "0.1.0"
+description = "Universal cross-product dynamic port allocator and global service registry"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Kubes Engineering Team" }
+]
+keywords = ["port", "allocator", "microservices", "registry", "developer-tools"]
+dependencies = []
+
+[project.scripts]
+port-alloc = "port_alloc.cli:main"
+port-status = "port_alloc.cli:main_status"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/port_alloc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

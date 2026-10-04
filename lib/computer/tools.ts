@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { browse, clickPage, typePage } from "@/lib/computer/browser";
+import { browse, clickPage, typePage } from "./browser.ts";
 import {
   ensureWorkspace,
   execCommand,
@@ -9,7 +9,8 @@ import {
   readText,
   resolveInside,
   writeText,
-} from "@/lib/computer/jail";
+} from "./jail.ts";
+
 
 type Actor = { slug: string; name: string; isMaestro: boolean };
 
@@ -124,5 +125,177 @@ export function computerTools(actor: Actor) {
         }
       },
     }),
+    live_search: tool({
+      description:
+        "Perform real-time web search for current events, breaking news, live documentation, market data, and job listings with verified citations.",
+      inputSchema: z.object({
+        query: z.string().describe("Search keywords or natural language query"),
+        maxResults: z.number().int().min(1).max(10).optional().default(5),
+      }),
+      execute: async ({ query, maxResults }) => {
+        try {
+          const { executeLiveSearch } = await import("../ai/search.ts");
+          const searchResult = await executeLiveSearch(query, maxResults);
+          return {
+            ok: true,
+            summary: `Searched web for "${query}" (${searchResult.results.length} sources)`,
+            ...searchResult,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    memory_remember: tool({
+      description:
+        "Store a key user preference, fact, project detail, or context into long-term memory across sessions.",
+      inputSchema: z.object({
+        content: z.string().describe("The information/fact to remember"),
+        category: z.enum(["preference", "project", "fact", "instruction", "general"]).optional().default("general"),
+        keywords: z.array(z.string()).optional(),
+      }),
+      execute: async ({ content, category, keywords }) => {
+        try {
+          const { saveMemory } = await import("../memory/store.ts");
+          const saved = saveMemory({
+            cubeSlug: actor.slug,
+            category,
+            content,
+            keywords,
+          });
+          return {
+            ok: true,
+            summary: `Remembered: "${content.slice(0, 60)}..."`,
+            memoryId: saved.id,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    memory_recall: tool({
+      description: "Search and recall relevant past memories, facts, and user preferences by topic.",
+      inputSchema: z.object({
+        query: z.string().describe("Topic or question to recall context for"),
+        limit: z.number().int().min(1).max(10).optional().default(5),
+      }),
+      execute: async ({ query, limit }) => {
+        try {
+          const { queryMemories } = await import("../memory/store.ts");
+          const memories = queryMemories(actor.slug, query, limit);
+          return {
+            ok: true,
+            summary: `Recalled ${memories.length} memories for "${query}"`,
+            memories: memories.map((m) => ({ category: m.category, content: m.content, createdAt: m.createdAt })),
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    job_application_track: tool({
+      description:
+        "Manage job applications in notes/applications.md. Record new job opportunities, update status, and set next steps.",
+      inputSchema: z.object({
+        role: z.string().describe("Job title or position"),
+        company: z.string().describe("Company or organization name"),
+        link: z.string().optional().default(""),
+        status: z.enum(["Wishlist", "Applied", "Interviewing", "Offer", "Rejected"]).optional().default("Applied"),
+        nextStep: z.string().optional().default("Follow up"),
+        notes: z.string().optional().default(""),
+      }),
+      execute: async ({ role, company, link, status, nextStep, notes }) => {
+        try {
+          const { recordApplication } = await import("../specialist/job_hunt.ts");
+          const apps = recordApplication(
+            {
+              role,
+              company,
+              link: link || "",
+              status: status || "Applied",
+              nextStep: nextStep || "",
+              date: new Date().toISOString().slice(0, 10),
+              notes: notes || "",
+            },
+            actor.slug,
+          );
+          return {
+            ok: true,
+            summary: `Recorded application: ${role} at ${company} [${status}]`,
+            totalApplications: apps.length,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    money_ledger_record: tool({
+      description:
+        "Log a financial expense, income, or recurring subscription into notes/ledger.csv and compute current budget metrics.",
+      inputSchema: z.object({
+        payee: z.string().describe("Merchant, employer, or payee name"),
+        amount: z.number().positive().describe("Amount in dollars/currency"),
+        category: z.string().describe("Expense category e.g. Rent, Groceries, Cloud, Salary"),
+        type: z.enum(["expense", "income", "subscription"]).optional().default("expense"),
+        notes: z.string().optional().default(""),
+      }),
+      execute: async ({ payee, amount, category, type, notes }) => {
+        try {
+          const { recordTransaction } = await import("../specialist/money_ledger.ts");
+          const summary = recordTransaction(
+            {
+              date: new Date().toISOString().slice(0, 10),
+              payee,
+              category,
+              amount,
+              type: type || "expense",
+              notes: notes || "",
+            },
+            actor.slug,
+          );
+          return {
+            ok: true,
+            summary: `Recorded ${type}: $${amount} for ${payee} (${category})`,
+            budgetSummary: summary,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    concept_diagram_create: tool({
+      description:
+        "Generate and save a visual Mermaid mind-map, flowchart, or architecture diagram artifact into notes/diagram.mmd.",
+      inputSchema: z.object({
+        title: z.string().describe("Diagram title"),
+        mermaidCode: z.string().describe("Valid Mermaid syntax (e.g. flowchart TD / mindmap / sequenceDiagram)"),
+        explanation: z.string().optional().describe("Brief conceptual explanation of the diagram"),
+        fileName: z.string().optional().default("diagram.mmd"),
+      }),
+      execute: async ({ title, mermaidCode, explanation, fileName }) => {
+        try {
+          const { saveDiagramArtifact } = await import("../specialist/diagrams.ts");
+          const result = saveDiagramArtifact(
+            {
+              title,
+              type: "flowchart",
+              mermaidCode,
+              explanation,
+            },
+            actor.slug,
+            fileName,
+          );
+          return {
+            ok: true,
+            summary: `Created diagram: "${title}" at ${result.path}`,
+            path: result.path,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
   } satisfies ToolSet;
 }
+
+

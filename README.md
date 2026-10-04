@@ -16,6 +16,7 @@ You chat with **Maestro**, the default coordinator, who delegates complex proble
 ## Key Features
 
 - **Maestro & Specialist Roster:** Maestro analyzes your goal and hands it off to the best specialist in a clean, one-hop delegation pattern. You can also chat directly with any specialist at any time.
+- **Live Web Search & Citations:** Pluggable real-time search engine (Tavily, Brave, xAI, DuckDuckGo) delivering up-to-the-minute information, market data, and documentation with clickable source citation badges.
 - **Shared Workspace Computer (`data/computer`):**
   - **Directory Isolation:** Each Cube has its own isolated filesystem sandbox (`data/computer/cubes/<slug>`). Maestro can read across all directories to oversee work, but writes remain strictly scoped to each Cube.
   - **Single-Seat Execution Mutex:** Terminal commands and headless browser sessions share a single seat lock with automated concurrency management.
@@ -23,6 +24,7 @@ You chat with **Maestro**, the default coordinator, who delegates complex proble
 - **Live Tune & Roster Management:** Modify instructions, pain points, names, or swap LLM models on the fly through the UI. Edits take effect immediately on the next message turn.
 - **In-App Cron Schedules:** Define recurring automated instructions using cron presets (hourly, daily, weekly) or custom 5-field cron expressions. Runs execute against the machine clock and write output to dedicated chat threads.
 - **Provider Agnostic:** Compatible with any OpenAI-compatible `/chat/completions` API endpoint, including xAI (Grok), OpenAI, OpenRouter, Groq, Ollama, and vLLM.
+
 
 ---
 
@@ -76,7 +78,9 @@ Agents have access to a controlled tool suite executed within the workspace:
 
 | Tool | Capability | Access Scope |
 | :--- | :--- | :--- |
+| `live_search` | Real-time web search with source URLs and verified citations. | Available to all Cubes. |
 | `computer_list` | Lists files and directory trees. | Maestro sees all; specialists see own directory. |
+
 | `computer_read` | Reads text file content up to 32KB. | Maestro can read any; specialists read own. |
 | `computer_write` | Creates and writes text files. | Strictly scoped to the Cube's own folder. |
 | `computer_exec` | Executes a single bash command in a clean env. | Scoped working directory, 30s timeout, seat lock. |

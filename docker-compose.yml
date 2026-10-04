@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  kubes-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kubes-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.x.ai/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-grok-4.7}
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-grok-4.7}
+      - FALLBACK_MODELS=${FALLBACK_MODELS:-grok-4,grok-3,gpt-4o,claude-3-7-sonnet}
+      - KUBEROUTE_GATEWAY_URL=${KUBEROUTE_GATEWAY_URL:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - AUTH_MODE=${AUTH_MODE:-none}
+      - CUBES_CHROME=/usr/bin/chromium
+      - CUBES_COMPUTER_ROOT=/app/data/computer
+    volumes:
+      - kubes_data:/app/data
+    depends_on:
+      - kubes-agent-core
+    networks:
+      - kubes-network
+
+  kubes-agent-core:
+    build:
+      context: ./services/agent-core
+      dockerfile: Dockerfile
+    container_name: kubes-agent-core
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - KUBEMIND_ENABLED=${KUBEMIND_ENABLED:-false}
+      - KUBEMIND_GATEWAY_URL=${KUBEMIND_GATEWAY_URL:-http://localhost:9080}
+    networks:
+      - kubes-network
+
+  kubes-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kubes-scheduler
+    restart: unless-stopped
+    command: ["node", "--experimental-strip-types", "scripts/scheduler.ts"]
+    environment:
+      - NODE_ENV=production
+      - CUBES_COMPUTER_ROOT=/app/data/computer
+    volumes:
+      - kubes_data:/app/data
+    depends_on:
+      - kubes-web
+    networks:
+      - kubes-network
+
+volumes:
+  kubes_data:
+    driver: local
+
+networks:
+  kubes-network:
+    driver: bridge

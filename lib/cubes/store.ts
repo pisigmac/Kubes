@@ -1,15 +1,16 @@
 import type { UIMessage } from "ai";
-import { db } from "@/lib/db";
-import { seedByKey } from "@/lib/cubes/catalog";
-import { defaultModel } from "@/lib/ai/provider";
-import type { Cube, Thread } from "@/lib/cubes/types";
+import { db } from "../db.ts";
+import { seedByKey } from "./catalog.ts";
+import { defaultModel } from "../ai/provider.ts";
+import type { Cube, Thread } from "./types.ts";
+
 
 export class HttpError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
     super(message);
+    this.status = status;
   }
 }
 

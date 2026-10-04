@@ -7,17 +7,27 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/computer/*.test.ts"
+    "test": "node --experimental-strip-types --test lib/computer/*.test.ts lib/memory/*.test.ts lib/auth/*.test.ts",
+    "schedules": "node --experimental-strip-types scripts/scheduler.ts",
+    "start:all": "bash scripts/start-all.sh",
+    "stop:all": "bash scripts/stop-all.sh",
+    "status": "bash scripts/status.sh",
+    "verify": "bash scripts/verify.sh"
   },
+
   "dependencies": {
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/react": "^4.0.130",
     "ai": "^7.0.127",
     "better-sqlite3": "^13.0.3",
+    "highlight.js": "^11.12.0",
     "next": "16.3.8",
     "puppeteer-core": "^25.12.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {

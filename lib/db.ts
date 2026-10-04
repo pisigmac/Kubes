@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { LEGACY_MAESTRO_INSTRUCTIONS, LEGACY_WORK, SEED_CUBES } from "@/lib/cubes/catalog";
-import { defaultModel } from "@/lib/ai/provider";
+import { LEGACY_MAESTRO_INSTRUCTIONS, LEGACY_WORK, SEED_CUBES } from "./cubes/catalog.ts";
+import { defaultModel } from "./ai/provider.ts";
+
 
 const globalForDb = globalThis as unknown as { cubesDb?: Database.Database };
 
@@ -58,8 +59,32 @@ function migrate(database: Database.Database) {
       FOREIGN KEY (thread_id) REFERENCES threads(id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread_position ON messages (thread_id, position);
+
+    CREATE TABLE IF NOT EXISTS command_logs (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL,
+      command TEXT NOT NULL,
+      exit_code INTEGER,
+      stdout TEXT NOT NULL,
+      stderr TEXT NOT NULL,
+      driver TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS command_logs_slug_created ON command_logs (slug, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      cube_slug TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      keywords TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS memories_slug_category ON memories (cube_slug, category);
   `);
 }
+
 
 function seed(database: Database.Database) {
   const now = new Date().toISOString();
@@ -137,8 +162,9 @@ export function db(): Database.Database {
     seed(database);
     globalForDb.cubesDb = database;
     queueMicrotask(() => {
-      void import("@/lib/computer/schedule").then((mod) => mod.startScheduler());
+      void import("./computer/schedule.ts").then((mod) => mod.startScheduler());
     });
+
   }
   return globalForDb.cubesDb;
 }

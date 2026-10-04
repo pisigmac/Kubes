@@ -1,8 +1,12 @@
-# Cubes
+# Kubes
 
-Cubes is a local chat app. One person uses it in a browser. There is no account and no shared server.
+> **Core Concept:** **Kubes are AI Agents**, not tasks. Each Cube is an autonomous, persistent AI specialist with its own persona, instructions, reasoning models, and sandboxed workspace. **Tasks** are the specific instructions, goals, or recurring scheduled routines that users assign to these AI agents.
 
-**Maestro** is the Cube you start in. It routes work, and it can create or retune the others. The specialists are Focus, Money, Work, Job hunt, Body, Learn, Write, Life admin, and Calm. You can talk to any of them directly. Any Cube can hand one task to one other Cube. That handoff stops there: the receiver does not hand it on.
+**Kubes** is a local multi-agent intelligence app. One person uses it in a browser. There is no account and no shared server.
+
+
+**Maestro** is the coordinator Cube (AI Agent) you start in. It routes work, and it can create or retune the others. The specialist AI agents are Focus, Money, Work, Job hunt, Body, Learn, Write, Life admin, and Calm. You can talk to any of them directly. Any Cube can hand one task or workflow to one other Cube. That handoff stops there: the receiver does not hand it on.
+
 
 Each Cube remembers its own name, pain point, instructions, and model. The next message uses whatever was saved.
 
@@ -64,6 +68,7 @@ Computer tools:
 
 | Tool | What it does |
 | --- | --- |
+| `live_search` | Real-time web search for live events, documentation, and market data with citation URLs. |
 | `computer_list` | List a directory. Maestro may pass another Cube's slug. |
 | `computer_read` | Read a text file. Maestro may read another Cube. |
 | `computer_write` | Write a text file in this Cube's own directory. |
@@ -72,7 +77,23 @@ Computer tools:
 | `computer_click` | Click visible text, or a CSS selector that starts with `#`, `.`, or `[`. |
 | `computer_type` | Type into the open page. |
 
+### Live Web Search vs. Computer Browse
+
+Kubes provides two distinct ways for AI agents to interact with the internet:
+
+1. **`live_search` (Information Discovery & Grounding):**
+   - Takes a natural language search query (e.g., *"Next.js 16 breaking changes"* or *"remote TypeScript job openings"*).
+   - Returns top 5–10 structured snippets with verified source URLs, publication timestamps, and domain badges.
+   - Ideal for breaking news, current events, library documentation, and market trends.
+   - Pluggable provider support: xAI Live Search, Tavily AI, Brave Search, and zero-config DuckDuckGo fallback.
+
+2. **`computer_browse` (Targeted Page Interaction):**
+   - Navigates headless Chromium/Puppeteer to a specific known URL.
+   - Reads full DOM text, takes UI screenshots, clicks interactive elements (`computer_click`), and fills forms (`computer_type`).
+   - Scoped strictly to public URLs (private/localhost IPs are blocked).
+
 A direct Maestro turn stops after 16 steps. A specialist turn, a handoff receiver, and a scheduled run stop after 12. A scheduled run is aborted after two minutes.
+
 
 The transcript shows a "handed to {name}" chip, then the receiver's reply. Computer tool lines in that handoff are shown with the chip. Maestro is told not to paste the reply again.
 
@@ -150,11 +171,24 @@ All of these are local and unauthenticated.
 
 `npm test` runs the computer tests: cron gaps, directory jail, the seat, a schedule claim, and private URLs. `npx tsc --noEmit` and `npx eslint app components lib --max-warnings 0` are the other checks. Chat is not covered by those tests. It needs a key that matches the base URL.
 
+## Ecosystem Integrations & Companion Projects
+
+Kubes is designed to interface with complementary specialized modules in the ecosystem:
+
+| Project | Role in Kubes Ecosystem | Integration Pattern |
+| :--- | :--- | :--- |
+| **`DeskID`** | **Identity, Auth & Multi-Tenancy**: RS256 JWKS authentication, OAuth, role-based Cube access control, and organization tenancy. | Next.js `middleware.ts` stateless token verification when `AUTH_MODE=deskid`. |
+| **`capsule`** | **Local Atomic Fact Memory**: Stores facts as Git-traceable Markdown files with SQLite FTS5 index. | Mounted in `data/computer/notes/` for sub-millisecond local recall without heavy vector databases. |
+| **`tracelens`** | **Agent Observability & Cost Tracking**: Tracks token consumption, latency per tool step, and costs. | Integrated in `lib/cubes/runtime.ts` via the `tracelens-ai` npm SDK. |
+| **`keymint`** | **Zero-Trust API Key Gateway**: Protects master provider keys, enforces budgets, and rate-limits agents. | Kubes points `OPENAI_BASE_URL` to KeyMint Go proxy (`http://localhost:8080/v1`). |
+| **`kubemind`** | **Enterprise Governance & Control Plane**: Zero-egress PII masking (ONNX BERT NER), Sentinel audit ledger. | Enterprise mode backend via `@kubemind/sdk` and native Model Context Protocol (MCP) server. |
+
 ## Limits that are on purpose
 
 - Money is not financial advice. Body is not medical care. Calm is not therapy. Job hunt does not invent employers or salaries. Work does not invent legal rights.
-- No sign-in, no second user, no voice, no image generation.
+- In default standalone mode (`AUTH_MODE=none`), no sign-in or multi-tenancy is active; enterprise mode enables DeskID authentication. No voice, no image generation in core.
 - No control of your real desktop, and no listener on your keyboard.
 - No chained handoff, and Maestro cannot write another Cube's files.
 - Schedules do not use the system crontab. They die when the Next process dies.
 - The jail is not a container.
+

@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Browser, Page } from "puppeteer-core";
-import { chromeDir, screenshotPath, withSeat } from "@/lib/computer/jail";
-import { assertPublicUrl } from "@/lib/computer/url";
+import { chromeDir, screenshotPath, withSeat } from "./jail.ts";
+import { assertPublicUrl } from "./url.ts";
+
 
 type BrowserModule = typeof import("puppeteer-core");
 
@@ -31,6 +32,15 @@ async function screen(): Promise<Page> {
   if (!page || page.isClosed()) {
     page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+    await page.setRequestInterception(true);
+    page.on("request", async (req) => {
+      try {
+        await assertPublicUrl(req.url());
+        await req.continue();
+      } catch {
+        await req.abort("accessdenied");
+      }
+    });
   }
   return page;
 }

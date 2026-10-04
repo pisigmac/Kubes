@@ -2,6 +2,7 @@
 
 import { isToolUIPart, type UIMessage } from "ai";
 import { accentFor } from "@/components/cube-mark";
+import { MarkdownView } from "@/components/markdown-view";
 import type { Cube, CubeMutationResult, HandoffResult } from "@/lib/cubes/types";
 
 function toolNameOf(part: { type: string; toolName?: string }) {
@@ -30,10 +31,12 @@ export function Transcript({
   messages,
   cubes,
   activeName,
+  onViewArtifact,
 }: {
   messages: UIMessage[];
   cubes: Cube[];
   activeName: string;
+  onViewArtifact?: (artifact: { name: string; path: string; content: string }) => void;
 }) {
   if (messages.length === 0) {
     return (
@@ -54,7 +57,13 @@ export function Transcript({
   return (
     <div className="mx-auto mt-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
       {messages.map((message) => (
-        <Message key={message.id} message={message} cubes={cubes} activeName={activeName} />
+        <Message
+          key={message.id}
+          message={message}
+          cubes={cubes}
+          activeName={activeName}
+          onViewArtifact={onViewArtifact}
+        />
       ))}
     </div>
   );
@@ -64,10 +73,12 @@ function Message({
   message,
   cubes,
   activeName,
+  onViewArtifact,
 }: {
   message: UIMessage;
   cubes: Cube[];
   activeName: string;
+  onViewArtifact?: (artifact: { name: string; path: string; content: string }) => void;
 }) {
   if (message.role === "user") {
     const text = message.parts
@@ -88,9 +99,9 @@ function Message({
       {message.parts.map((part, index) => {
         if (part.type === "text" && part.text) {
           return (
-            <p key={`${message.id}-text-${index}`} className="max-w-[42rem] text-[15px] leading-7 whitespace-pre-wrap">
-              {part.text}
-            </p>
+            <div key={`${message.id}-text-${index}`} className="max-w-[42rem]">
+              <MarkdownView content={part.text} />
+            </div>
           );
         }
 
@@ -115,6 +126,54 @@ function Message({
 
         if (name === "create_cube" || name === "update_cube") {
           return <MutationPart key={key} name={name} part={part} />;
+        }
+
+        if (name === "computer_write" && part.state === "output-available" && isRecord(part.input)) {
+          const input = part.input as { path?: string; text?: string };
+          const filePath = input.path || "file";
+          const fileName = filePath.split("/").pop() || filePath;
+          return (
+            <div key={key} className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onViewArtifact && input.text !== undefined) {
+                    onViewArtifact({
+                      name: fileName,
+                      path: filePath,
+                      content: input.text,
+                    });
+                  }
+                }}
+                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/80 transition-colors hover:border-[#e7ff3a]/40 hover:bg-white/[0.06] hover:text-white"
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-[#e7ff3a]" />
+                <span>Created <strong>{fileName}</strong></span>
+                <span className="text-white/40">· Click to view artifact</span>
+              </button>
+            </div>
+          );
+        }
+
+        if (name === "schedule_task" || name === "update_task") {
+          const output = part.state === "output-available" && isRecord(part.output) ? part.output : undefined;
+          const summary = typeof output?.summary === "string" ? output.summary : "Configuring task schedule…";
+          return (
+            <div key={key} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-white/80">
+              <svg className="h-4 w-4 shrink-0 text-[#e7ff3a]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{part.state === "output-error" ? part.errorText : summary}</span>
+            </div>
+          );
+        }
+
+        if (name === "delete_task") {
+          return (
+            <p key={key} className="text-xs text-white/50">
+              {part.state === "output-error" ? part.errorText : "Removed scheduled task."}
+            </p>
+          );
         }
 
         if (name.startsWith("computer_")) {
@@ -180,7 +239,7 @@ function HandoffPart({
       {output?.reply ? (
         <div className="max-w-[42rem] border-l-2 pl-4" style={{ borderColor: color }}>
           <p className="mb-1 text-xs tracking-wide text-white/45 uppercase">{cubeName}</p>
-          <p className="text-[15px] leading-7 whitespace-pre-wrap">{output.reply}</p>
+          <MarkdownView content={output.reply} />
         </div>
       ) : null}
     </div>

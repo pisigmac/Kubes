@@ -44,6 +44,14 @@ next-env.d.ts
 
 # local sqlite & computer workspace
 /data
+/.pids
+
+# python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
 
 # IDE and assistant configuration
 .cursor/

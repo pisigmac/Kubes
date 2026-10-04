@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { getSandboxDriver } from "./sandbox.ts";
 
 const OUTPUT_CAP = 32_000;
 const EXEC_MS = 30_000;
@@ -12,6 +12,7 @@ export type CommandRecord = {
   exitCode: number | null;
   stdout: string;
   stderr: string;
+  driver?: string;
 };
 
 export type TreeNode = {
@@ -36,8 +37,8 @@ export function computerRoot(): string {
 }
 
 export function seatWaitMs(): number {
-  const raw = Number(process.env.CUBES_SEAT_WAIT_MS ?? 20_000);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 20_000;
+  const raw = Number(process.env.CUBES_SEAT_WAIT_MS ?? 35_000);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 35_000;
 }
 
 export function seatHolder(): string | null {
@@ -123,12 +124,78 @@ function assertCommand(command: string, root: string): void {
 }
 
 export function recentCommands(limit = 20): CommandRecord[] {
+  const globalDb = (globalThis as unknown as {
+    cubesDb?: {
+      prepare: (sql: string) => {
+        all: (arg: unknown) => unknown[];
+      };
+    };
+  }).cubesDb;
+
+  if (globalDb) {
+    try {
+      const rows = globalDb
+        .prepare("SELECT * FROM command_logs ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as {
+          slug: string;
+          command: string;
+          exit_code: number | null;
+          stdout: string;
+          stderr: string;
+          driver: string;
+          created_at: string;
+        }[];
+      if (rows && rows.length > 0) {
+        return rows.map((r) => ({
+          at: r.created_at,
+          slug: r.slug,
+          command: r.command,
+          exitCode: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          driver: r.driver,
+        }));
+      }
+    } catch {
+      // fallback to in-memory cache if query fails
+    }
+  }
   return commands.slice(-limit).reverse();
 }
 
 export function rememberCommand(record: CommandRecord): void {
   commands.push(record);
   if (commands.length > 100) commands.splice(0, commands.length - 100);
+
+  const globalDb = (globalThis as unknown as {
+    cubesDb?: {
+      prepare: (sql: string) => {
+        run: (...args: unknown[]) => void;
+      };
+    };
+  }).cubesDb;
+
+  if (globalDb) {
+    try {
+      globalDb
+        .prepare(
+          `INSERT INTO command_logs (id, slug, command, exit_code, stdout, stderr, driver, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          record.slug,
+          record.command,
+          record.exitCode,
+          record.stdout,
+          record.stderr,
+          record.driver || "direct",
+          record.at,
+        );
+    } catch {
+      // Ignore DB write errors
+    }
+  }
 }
 
 export async function withSeat<T>(name: string, fn: () => Promise<T>): Promise<T> {
@@ -175,54 +242,26 @@ export async function execCommand(
   isMaestro: boolean,
   name: string,
   command: string,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
   const root = ensureWorkspace(slug, isMaestro);
   assertCommand(command, root);
   return withSeat(name, () => runBash(root, slug, command));
 }
 
-function runBash(
+async function runBash(
   root: string,
   slug: string,
   command: string,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const child = spawn("bash", ["-c", command], {
-      cwd: root,
-      env: {
-        PATH: process.env.PATH || "/usr/bin:/bin",
-        HOME: root,
-        LANG: "C.UTF-8",
-        TERM: "dumb",
-      } as unknown as NodeJS.ProcessEnv,
-      signal: AbortSignal.timeout(EXEC_MS),
-    });
-    const take = (chunk: Buffer, current: string) => {
-      const next = (current + chunk.toString("utf8")).slice(-OUTPUT_CAP);
-      return next;
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout = take(chunk, stdout);
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = take(chunk, stderr);
-    });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      const result = { exitCode: code, stdout, stderr };
-      rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
-      resolve(result);
-    });
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
+  const driver = getSandboxDriver();
+  const result = await driver.execute({
+    root,
+    slug,
+    command,
+    timeoutMs: EXEC_MS,
   });
+  rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
+  return result;
 }
 
 export function listTree(root: string, depth = 3): TreeNode[] {

@@ -1,4 +1,5 @@
-import { defaultModel, resolveApiKey, resolveBaseURL } from "@/lib/ai/provider";
+import { defaultModel, resolveApiKey, resolveBaseURL } from "./provider.ts";
+
 
 type Cache = { at: number; ids: string[]; live: boolean };
 

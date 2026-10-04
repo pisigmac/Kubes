@@ -6,6 +6,7 @@ import { ComputerPane, type ComputerSnapshot } from "@/components/computer-pane"
 import { CubeAvatar, CubeMark } from "@/components/cube-mark";
 import { CubeChat } from "@/components/cube-chat";
 import { CubeEditor } from "@/components/cube-editor";
+import { MemoryView } from "@/components/memory-view";
 import { ModelSelect } from "@/components/model-select";
 import type { Cube, Thread } from "@/lib/cubes/types";
 
@@ -57,6 +58,7 @@ export function CubesApp({
   const [notice, setNotice] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [models] = useState(initialModels);
   const [schedules, setSchedules] = useState(initialSchedules);
@@ -238,9 +240,16 @@ export function CubesApp({
             <button
               type="button"
               onClick={() => void showComputer(null)}
-              className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80"
+              className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80 hover:bg-white/5"
             >
               Computer
+            </button>
+            <button
+              type="button"
+              onClick={() => setMemoryOpen(true)}
+              className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80 hover:bg-white/5 flex items-center gap-1.5"
+            >
+              <span className="text-xs">🧠</span> Memory
             </button>
           </div>
           {selected && !creating ? (
@@ -277,21 +286,44 @@ export function CubesApp({
       <div
         className={`${computerOpen ? "fixed inset-0 z-40 flex justify-end bg-black/50 lg:static lg:z-auto lg:w-[340px] lg:min-w-[340px] lg:max-w-[340px] lg:shrink-0 lg:bg-transparent" : "hidden"}`}
       >
-        {watched ? (
-          <ComputerPane
-            cubeId={watched.id}
-            snapshot={snapshot}
-            revision={computerRevision}
-            onClose={() => setComputerOpen(false)}
+        {computerOpen ? (
+          <button
+            type="button"
+            aria-label="Close computer panel"
+            className="absolute inset-0 bg-transparent lg:hidden"
+            onClick={() => setComputerOpen(false)}
           />
+        ) : null}
+        {watched ? (
+          <div className="relative z-10 h-full w-full lg:static">
+            <ComputerPane
+              cubeId={watched.id}
+              snapshot={snapshot}
+              revision={computerRevision}
+              onClose={() => setComputerOpen(false)}
+            />
+          </div>
         ) : null}
       </div>
 
       <div
         className={`${editorOpen ? "fixed inset-0 z-40 flex justify-end bg-black/50" : "hidden"} lg:static lg:flex lg:w-[340px] lg:min-w-[340px] lg:max-w-[340px] lg:shrink-0 lg:overflow-hidden lg:bg-transparent`}
       >
+        {editorOpen ? (
+          <button
+            type="button"
+            aria-label="Close editor"
+            className="absolute inset-0 bg-transparent lg:hidden"
+            onClick={() => {
+              setEditorOpen(false);
+              setCreating(false);
+              setNotice(null);
+            }}
+          />
+        ) : null}
         {creating || selected ? (
-          <CubeEditor
+          <div className="relative z-10 h-full w-full lg:static">
+            <CubeEditor
             key={creating || !selected ? "create" : `${selected.id}:${selected.updatedAt}`}
             cube={selected}
             creating={creating}
@@ -324,8 +356,20 @@ export function CubesApp({
                 });
             }}
           />
+          </div>
         ) : null}
       </div>
+
+      {memoryOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 md:p-6">
+          <div className="relative h-full max-h-[85vh] w-full max-w-4xl">
+            <MemoryView
+              currentCubeSlug={selected?.slug}
+              onClose={() => setMemoryOpen(false)}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

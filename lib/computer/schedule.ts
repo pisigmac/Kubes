@@ -1,9 +1,10 @@
 import type { UIMessage } from "ai";
-import { claimRow, parseCron, nextCron } from "@/lib/computer/cron";
-import { db } from "@/lib/db";
-import { isCubeBusy } from "@/lib/cubes/busy";
-import { runCubeInstruction } from "@/lib/cubes/runtime";
-import { createThread, getCube, getMessages, getThread, saveThreadMessages } from "@/lib/cubes/store";
+import { claimRow, parseCron, nextCron } from "./cron.ts";
+import { db } from "../db.ts";
+import { isCubeBusy } from "../cubes/busy.ts";
+import { runCubeInstruction } from "../cubes/runtime.ts";
+import { createThread, getCube, getMessages, getThread, saveThreadMessages } from "../cubes/store.ts";
+
 
 export type Schedule = {
   id: string;
@@ -127,7 +128,18 @@ export function startScheduler(): void {
   globalForSchedule.cubesScheduler = setInterval(() => {
     void tick().catch((error) => console.error("Schedule tick failed", error));
   }, 30_000);
+  if (globalForSchedule.cubesScheduler.unref) {
+    globalForSchedule.cubesScheduler.unref();
+  }
   void tick().catch((error) => console.error("Schedule tick failed", error));
+}
+
+
+export function stopScheduler(): void {
+  if (globalForSchedule.cubesScheduler) {
+    clearInterval(globalForSchedule.cubesScheduler);
+    globalForSchedule.cubesScheduler = undefined;
+  }
 }
 
 export async function tick(now = new Date()): Promise<void> {
