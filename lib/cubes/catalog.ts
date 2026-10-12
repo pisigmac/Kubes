@@ -1,3 +1,5 @@
+import { getSpecialistRecommendations } from "../ai/provider.ts";
+
 export type SeedCube = {
   slug: string;
   name: string;
@@ -5,6 +7,8 @@ export type SeedCube = {
   instructions: string;
   isMaestro?: boolean;
 };
+
+export const SPECIALIST_MODEL_RECOMMENDATIONS: Record<string, string[]> = getSpecialistRecommendations();
 
 const voice = "Be direct and specific. Short paragraphs. No pep-talk filler, no emoji. Ask one question only when you are blocked.";
 

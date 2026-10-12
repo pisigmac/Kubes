@@ -51,19 +51,22 @@ function safeSlug(slug: string): string {
   return clean;
 }
 
-export function ownRoot(slug: string, isMaestro: boolean): string {
+export function ownRoot(slug: string, isMaestro: boolean, orgId = "default"): string {
   const root = computerRoot();
-  return isMaestro ? path.join(root, "home") : path.join(root, "cubes", safeSlug(slug));
+  const cleanOrg = orgId && orgId !== "default" ? orgId.replace(/[^a-zA-Z0-9_-]/g, "_") : null;
+  const base = cleanOrg ? path.join(root, "orgs", cleanOrg) : root;
+  return isMaestro ? path.join(base, "home") : path.join(base, "cubes", safeSlug(slug));
 }
 
-export function ensureWorkspace(slug: string, isMaestro: boolean): string {
-  const root = ownRoot(slug, isMaestro);
+export function ensureWorkspace(slug: string, isMaestro: boolean, orgId = "default"): string {
+  const root = ownRoot(slug, isMaestro, orgId);
   fs.mkdirSync(path.join(root, "notes"), { recursive: true });
   const tools = path.join(root, "TOOLS.md");
   if (!fs.existsSync(tools)) {
     fs.writeFileSync(tools, "# Tools\n\nScripts and conventions this Cube keeps for itself.\n");
   }
-  fs.mkdirSync(path.join(computerRoot(), "shots"), { recursive: true });
+  const shotDir = path.dirname(screenshotPath(orgId));
+  fs.mkdirSync(shotDir, { recursive: true });
   return root;
 }
 
@@ -95,12 +98,12 @@ export function resolveInside(root: string, userPath: string): string {
   return realInside(root, lexical);
 }
 
-export function readRootFor(actor: { slug: string; isMaestro: boolean }, targetSlug: string): string {
+export function readRootFor(actor: { slug: string; isMaestro: boolean }, targetSlug: string, orgId = "default"): string {
   if (!actor.isMaestro && targetSlug !== actor.slug) {
     throw new Error("That directory belongs to another Cube.");
   }
   const targetMaestro = actor.isMaestro && (targetSlug === "maestro" || targetSlug === actor.slug);
-  return ensureWorkspace(targetMaestro ? actor.slug : targetSlug, targetMaestro);
+  return ensureWorkspace(targetMaestro ? actor.slug : targetSlug, targetMaestro, orgId);
 }
 
 function assertCommand(command: string, root: string): void {
@@ -242,8 +245,9 @@ export async function execCommand(
   isMaestro: boolean,
   name: string,
   command: string,
+  orgId = "default",
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
-  const root = ensureWorkspace(slug, isMaestro);
+  const root = ensureWorkspace(slug, isMaestro, orgId);
   assertCommand(command, root);
   return withSeat(name, () => runBash(root, slug, command));
 }
@@ -327,14 +331,23 @@ export function readDownload(root: string, userPath: string): { file: string; na
   return { file, name: path.basename(file), bytes: fs.readFileSync(file) };
 }
 
-export function chromeDir(): string {
+export function chromeDir(orgId = "default"): string {
+  if (orgId && orgId !== "default") {
+    const cleanOrg = orgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return path.join(computerRoot(), "orgs", cleanOrg, "chrome");
+  }
   return path.join(computerRoot(), "chrome");
 }
 
-export function screenshotPath(): string {
+export function screenshotPath(orgId = "default"): string {
+  if (orgId && orgId !== "default") {
+    const cleanOrg = orgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return path.join(computerRoot(), "orgs", cleanOrg, "shots", "latest.png");
+  }
   return path.join(computerRoot(), "shots", "latest.png");
 }
 
-export function screenshotExists(): boolean {
-  return fs.existsSync(screenshotPath());
+export function screenshotExists(orgId = "default"): boolean {
+  return fs.existsSync(screenshotPath(orgId));
 }
+

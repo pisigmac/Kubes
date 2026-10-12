@@ -8,6 +8,7 @@ import { CubeChat } from "@/components/cube-chat";
 import { CubeEditor } from "@/components/cube-editor";
 import { MemoryView } from "@/components/memory-view";
 import { ModelSelect } from "@/components/model-select";
+import { ProviderModal } from "@/components/provider-modal";
 import type { Cube, Thread } from "@/lib/cubes/types";
 
 type Schedule = {
@@ -59,6 +60,7 @@ export function CubesApp({
   const [navOpen, setNavOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [providerOpen, setProviderOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [models] = useState(initialModels);
   const [schedules, setSchedules] = useState(initialSchedules);
@@ -222,6 +224,18 @@ export function CubesApp({
                 {creating ? "A specialist Maestro can hand work to" : selected?.painPoint}
               </p>
             </div>
+            {creating ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCreating(false);
+                  setNotice(null);
+                }}
+                className="shrink-0 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/20 transition"
+              >
+                Cancel
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void newChat()}
@@ -250,6 +264,13 @@ export function CubesApp({
               className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80 hover:bg-white/5 flex items-center gap-1.5"
             >
               <span className="text-xs">🧠</span> Memory
+            </button>
+            <button
+              type="button"
+              onClick={() => setProviderOpen(true)}
+              className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80 hover:bg-white/5 flex items-center gap-1.5"
+            >
+              <span className="text-xs">🔑</span> Providers
             </button>
           </div>
           {selected && !creating ? (
@@ -370,6 +391,14 @@ export function CubesApp({
           </div>
         </div>
       ) : null}
+
+      <ProviderModal
+        isOpen={providerOpen}
+        onClose={() => setProviderOpen(false)}
+        onModelSelect={(model) => {
+          if (selected) void patchModel(selected, model);
+        }}
+      />
     </div>
   );
 }

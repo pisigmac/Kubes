@@ -168,6 +168,45 @@ function Message({
           );
         }
 
+        if (name === "live_search") {
+          const output = part.state === "output-available" && isRecord(part.output) ? part.output : undefined;
+          const query = typeof output?.query === "string" ? output.query : (isRecord(part.input) && typeof part.input.query === "string" ? part.input.query : "");
+          const results = Array.isArray(output?.results) ? (output.results as Array<{ title?: string; url?: string; snippet?: string; domain?: string }>) : [];
+          const provider = typeof output?.provider === "string" ? output.provider : "web";
+
+          return (
+            <div key={key} className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
+              <div className="flex items-center justify-between text-white/70">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">🔍</span>
+                  <span className="font-medium text-white">Searched: &quot;{query}&quot;</span>
+                </div>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[10px] text-white/50 uppercase">
+                  {provider}
+                </span>
+              </div>
+              {results.length > 0 ? (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {results.map((res, idx) => (
+                    <a
+                      key={res.url || idx}
+                      href={res.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:border-[#e7ff3a]/40 hover:bg-white/[0.06] hover:text-white"
+                      title={res.snippet}
+                    >
+                      <span className="font-mono text-[10px] text-[#e7ff3a] font-semibold">[{idx + 1}]</span>
+                      <span className="max-w-[200px] truncate font-medium">{res.title || res.domain}</span>
+                      <span className="text-[10px] text-white/30 group-hover:text-white/60">↗</span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
         if (name === "delete_task") {
           return (
             <p key={key} className="text-xs text-white/50">

@@ -1,4 +1,6 @@
 import { db } from "../db.ts";
+import { resolveScope } from "../cubes/store.ts";
+import type { ResourceScope } from "../auth/deskid.ts";
 
 export type MemoryCategory = "preference" | "project" | "fact" | "instruction" | "general";
 
@@ -8,6 +10,8 @@ export type Memory = {
   category: MemoryCategory;
   content: string;
   keywords: string;
+  orgId: string;
+  userId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -18,6 +22,8 @@ type MemoryRow = {
   category: string;
   content: string;
   keywords: string;
+  org_id: string;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -29,6 +35,8 @@ function mapMemory(row: MemoryRow): Memory {
     category: row.category as MemoryCategory,
     content: row.content,
     keywords: row.keywords,
+    orgId: row.org_id || "default",
+    userId: row.user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -53,7 +61,13 @@ export function saveMemory(input: {
   category?: MemoryCategory;
   content: string;
   keywords?: string[];
+  scope?: ResourceScope | string;
+  orgId?: string;
+  userId?: string | null;
 }): Memory {
+  const resolved = resolveScope(input.scope || input.orgId);
+  const orgId = input.scope ? resolved.orgId : input.orgId || resolved.orgId;
+  const userId = input.userId ?? resolved.userId;
   const content = input.content.trim();
   if (!content) throw new Error("Memory content cannot be empty.");
   const cubeSlug = input.cubeSlug.trim() || "global";
@@ -69,6 +83,8 @@ export function saveMemory(input: {
     category,
     content,
     keywords,
+    orgId,
+    userId,
     createdAt: now,
     updatedAt: now,
   };
@@ -76,9 +92,9 @@ export function saveMemory(input: {
   db()
     .prepare(
       `INSERT INTO memories (
-        id, cube_slug, category, content, keywords, created_at, updated_at
+        id, cube_slug, category, content, keywords, org_id, user_id, created_at, updated_at
       ) VALUES (
-        @id, @cubeSlug, @category, @content, @keywords, @createdAt, @updatedAt
+        @id, @cubeSlug, @category, @content, @keywords, @orgId, @userId, @createdAt, @updatedAt
       )`,
     )
     .run(memory);
@@ -86,23 +102,29 @@ export function saveMemory(input: {
   return memory;
 }
 
-export function queryMemories(cubeSlug: string, queryText: string, limit = 5): Memory[] {
+export function queryMemories(
+  cubeSlug: string,
+  queryText: string,
+  limit = 5,
+  scope?: ResourceScope | string,
+): Memory[] {
+  const resolved = resolveScope(scope);
   const database = db();
   const queryWords = extractKeywords(queryText).split(" ").filter(Boolean);
   if (queryWords.length === 0) {
     const rows = database
       .prepare(
-        "SELECT * FROM memories WHERE cube_slug = ? OR cube_slug = 'global' ORDER BY updated_at DESC LIMIT ?",
+        "SELECT * FROM memories WHERE (cube_slug = ? OR cube_slug = 'global') AND org_id = ? ORDER BY updated_at DESC LIMIT ?",
       )
-      .all(cubeSlug, limit) as MemoryRow[];
+      .all(cubeSlug, resolved.orgId, limit) as MemoryRow[];
     return rows.map(mapMemory);
   }
 
   const allRows = database
     .prepare(
-      "SELECT * FROM memories WHERE cube_slug = ? OR cube_slug = 'global' ORDER BY updated_at DESC",
+      "SELECT * FROM memories WHERE (cube_slug = ? OR cube_slug = 'global') AND org_id = ? ORDER BY updated_at DESC",
     )
-    .all(cubeSlug) as MemoryRow[];
+    .all(cubeSlug, resolved.orgId) as MemoryRow[];
 
   // Score memories by keyword overlap
   const scored = allRows.map((row) => {
@@ -121,22 +143,28 @@ export function queryMemories(cubeSlug: string, queryText: string, limit = 5): M
     .map((item) => item.memory);
 }
 
-export function listMemories(cubeSlug?: string): Memory[] {
+export function listMemories(cubeSlug?: string, scope?: ResourceScope | string): Memory[] {
+  const resolved = resolveScope(scope);
   const database = db();
   if (cubeSlug) {
     const rows = database
       .prepare(
-        "SELECT * FROM memories WHERE cube_slug = ? OR cube_slug = 'global' ORDER BY updated_at DESC",
+        "SELECT * FROM memories WHERE (cube_slug = ? OR cube_slug = 'global') AND org_id = ? ORDER BY updated_at DESC",
       )
-      .all(cubeSlug) as MemoryRow[];
+      .all(cubeSlug, resolved.orgId) as MemoryRow[];
     return rows.map(mapMemory);
   }
-  const rows = database.prepare("SELECT * FROM memories ORDER BY updated_at DESC").all() as MemoryRow[];
+  const rows = database
+    .prepare("SELECT * FROM memories WHERE org_id = ? ORDER BY updated_at DESC")
+    .all(resolved.orgId) as MemoryRow[];
   return rows.map(mapMemory);
 }
 
-export function getMemory(id: string): Memory | null {
-  const row = db().prepare("SELECT * FROM memories WHERE id = ?").get(id) as MemoryRow | undefined;
+export function getMemory(id: string, scope?: ResourceScope | string): Memory | null {
+  const resolved = resolveScope(scope);
+  const row = db().prepare("SELECT * FROM memories WHERE id = ? AND org_id = ?").get(id, resolved.orgId) as
+    | MemoryRow
+    | undefined;
   return row ? mapMemory(row) : null;
 }
 
@@ -146,9 +174,12 @@ export function updateMemory(
     content?: string;
     category?: MemoryCategory;
     keywords?: string[];
+    scope?: ResourceScope | string;
   },
+  scope?: ResourceScope | string,
 ): Memory {
-  const existing = getMemory(id);
+  const resolved = resolveScope(updates.scope || scope);
+  const existing = getMemory(id, resolved);
   if (!existing) throw new Error("Memory not found.");
 
   const content = updates.content !== undefined ? updates.content.trim() : existing.content;
@@ -172,7 +203,7 @@ export function updateMemory(
         content = @content,
         keywords = @keywords,
         updated_at = @updatedAt
-      WHERE id = @id`,
+      WHERE id = @id AND org_id = @orgId`,
     )
     .run({
       id,
@@ -180,6 +211,7 @@ export function updateMemory(
       content,
       keywords,
       updatedAt: now,
+      orgId: resolved.orgId,
     });
 
   return {
@@ -191,7 +223,8 @@ export function updateMemory(
   };
 }
 
-export function deleteMemory(id: string): void {
-  const result = db().prepare("DELETE FROM memories WHERE id = ?").run(id);
+export function deleteMemory(id: string, scope?: ResourceScope | string): void {
+  const resolved = resolveScope(scope);
+  const result = db().prepare("DELETE FROM memories WHERE id = ? AND org_id = ?").run(id, resolved.orgId);
   if (result.changes === 0) throw new Error("Memory not found.");
 }

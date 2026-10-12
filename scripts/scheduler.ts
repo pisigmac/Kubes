@@ -4,8 +4,8 @@
  * Run via: pnpm run schedules
  */
 
-import { listSchedules, startScheduler, stopScheduler } from "@/lib/computer/schedule";
-import { listCubes } from "@/lib/cubes/store";
+import { listSchedules, startScheduler, stopScheduler } from "../lib/computer/schedule.ts";
+import { listCubes } from "../lib/cubes/store.ts";
 
 console.log("=========================================");
 console.log("  Kubes Background Task Scheduler Daemon  ");
@@ -27,8 +27,14 @@ startScheduler();
 
 console.log("Scheduler daemon is running. Press Ctrl+C to terminate.\n");
 
+// Keep event loop active for standalone daemon mode
+const keepAlive = setInterval(() => {
+  // daemon heartbeat
+}, 60_000);
+
 function shutdown() {
   console.log("\nReceived shutdown signal. Stopping scheduler cleanly...");
+  clearInterval(keepAlive);
   stopScheduler();
   process.exit(0);
 }

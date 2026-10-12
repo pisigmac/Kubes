@@ -13,6 +13,7 @@ import {
   withSeat,
   writeText,
 } from "./jail.ts";
+import { getSandboxDriver } from "./sandbox.ts";
 
 process.env.CUBES_COMPUTER_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "cubes-computer-"));
 process.env.CUBES_SEAT_WAIT_MS = "200";
@@ -47,6 +48,13 @@ test("symlink that leaves the directory is refused", () => {
 });
 
 test("exec stays in the Cube directory and the seat is exclusive", async () => {
+  if (getSandboxDriver().name === "unavailable") {
+    await assert.rejects(
+      execCommand("focus", false, "Focus", "pwd"),
+      /Computer execution is disabled because no usable sandbox is available/,
+    );
+    return;
+  }
   const result = await execCommand("focus", false, "Focus", "pwd");
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /focus/);

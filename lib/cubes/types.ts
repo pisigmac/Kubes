@@ -7,6 +7,8 @@ export type Cube = {
   model: string;
   isMaestro: boolean;
   seedKey: string | null;
+  orgId?: string;
+  userId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -15,6 +17,8 @@ export type Thread = {
   id: string;
   cubeId: string;
   title: string;
+  orgId?: string;
+  userId?: string | null;
   createdAt: string;
   updatedAt: string;
 };

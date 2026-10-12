@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .core import (
     allocate_port,
+    register_service,
     get_service,
     release_port,
     list_services,
@@ -49,6 +50,29 @@ def cmd_allocate(args) -> None:
             pid=getattr(args, "pid", None),
         )
         print(port)
+    except Exception as e:
+        sys.stderr.write(f"Error: {e}\n")
+        sys.exit(1)
+
+
+def cmd_register(args) -> None:
+    meta = {}
+    if getattr(args, "meta", None):
+        try:
+            meta = json.loads(args.meta)
+        except Exception:
+            meta = {"note": args.meta}
+
+    try:
+        entry = register_service(
+            service=args.service,
+            port=args.port,
+            pid=getattr(args, "pid", None),
+            host=args.host,
+            url=args.url,
+            metadata=meta,
+        )
+        print(f"Registered service '{args.service}' on port {entry['port']}")
     except Exception as e:
         sys.stderr.write(f"Error: {e}\n")
         sys.exit(1)
@@ -96,10 +120,11 @@ def cmd_list(args) -> None:
     else:
         for name, entry in sorted(services.items(), key=lambda x: x[1].get("port", 0)):
             pid = entry.get("pid", 0)
-            alive = is_pid_alive(pid)
-            status = "🟢 Active" if alive else "🔴 Dead"
             port = entry.get("port", 0)
-            url = entry.get("url", f"http://{entry.get('host', '127.0.0.1')}:{port}")
+            host = entry.get("host", "127.0.0.1")
+            alive = is_pid_alive(pid) or not is_port_free(port, host)
+            status = "🟢 Active" if alive else "🔴 Dead"
+            url = entry.get("url", f"http://{host}:{port}")
             print(f"{name:<22} {port:<8} {pid:<8} {status:<12} {url}")
 
     print("━" * 75)
@@ -132,6 +157,16 @@ def create_parser() -> argparse.ArgumentParser:
     p_alloc.add_argument("--pid", type=int, help="Process ID owning this port lease")
     p_alloc.add_argument("--meta", help="Optional JSON or text metadata")
     p_alloc.set_defaults(func=cmd_allocate)
+
+    # Register
+    p_reg = subparsers.add_parser("register", help="Explicitly register a known service port")
+    p_reg.add_argument("--service", "-s", required=True, help="Unique service identifier")
+    p_reg.add_argument("--port", "-p", type=int, required=True, help="Port number")
+    p_reg.add_argument("--host", default="127.0.0.1", help="Host interface (default 127.0.0.1)")
+    p_reg.add_argument("--url", help="Optional health / service URL")
+    p_reg.add_argument("--pid", type=int, help="Process ID owning this port lease")
+    p_reg.add_argument("--meta", help="Optional JSON or text metadata")
+    p_reg.set_defaults(func=cmd_register)
 
     # Get
     p_get = subparsers.add_parser("get", help="Get port or URL for a registered service")

@@ -14,8 +14,8 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cubes-sandbox-test-"));
 test("sandbox driver auto-detection returns an active driver", () => {
   const driver = getSandboxDriver();
   assert.ok(driver);
-  assert.ok(driver.name === "bwrap" || driver.name === "docker" || driver.name === "direct");
-  assert.equal(driver.isAvailable(), true);
+  assert.ok(driver.name === "bwrap" || driver.name === "docker" || driver.name === "unavailable");
+  assert.equal(driver.isAvailable(), driver.name !== "unavailable");
 });
 
 test("DirectFallbackDriver executes commands in workspace directory", async () => {

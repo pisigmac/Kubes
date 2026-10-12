@@ -24,6 +24,40 @@ export interface SandboxDriver {
   execute(options: SandboxExecutionOptions): Promise<SandboxResult>;
 }
 
+class UnavailableSandboxDriver implements SandboxDriver {
+  name = "unavailable";
+
+  isAvailable(): boolean {
+    return false;
+  }
+
+  async execute(): Promise<SandboxResult> {
+    throw new Error("Computer execution is disabled because no usable sandbox is available.");
+  }
+}
+
+function getBwrapBaseArgs(): string[] {
+  const args: string[] = ["--ro-bind", "/usr", "/usr"];
+  for (const dir of ["/bin", "/lib", "/lib64", "/sbin", "/lib32", "/libx32"]) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const stat = fs.lstatSync(dir);
+      if (stat.isSymbolicLink()) {
+        const target = fs.readlinkSync(dir);
+        args.push("--symlink", target, dir);
+      } else if (stat.isDirectory()) {
+        args.push("--ro-bind", dir, dir);
+      }
+    } catch {
+      // Ignore directory check failures
+    }
+  }
+  if (fs.existsSync("/etc/resolv.conf")) {
+    args.push("--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf");
+  }
+  return args;
+}
+
 /**
  * Bubblewrap (bwrap) unprivileged Linux namespace sandbox driver.
  * Provides instant (<1ms) kernel-enforced filesystem and process isolation.
@@ -34,7 +68,16 @@ export class BwrapDriver implements SandboxDriver {
   isAvailable(): boolean {
     if (process.platform !== "linux") return false;
     try {
-      const result = spawnSync("which", ["bwrap"], { stdio: "ignore" });
+      const baseArgs = getBwrapBaseArgs();
+      const result = spawnSync("bwrap", [
+        ...baseArgs,
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--unshare-all",
+        "--die-with-parent",
+        "/usr/bin/true",
+      ], { stdio: "ignore", timeout: 3000 });
       return result.status === 0;
     } catch {
       return false;
@@ -48,21 +91,9 @@ export class BwrapDriver implements SandboxDriver {
       let settled = false;
 
       // Construct bwrap isolation arguments
+      const baseArgs = getBwrapBaseArgs();
       const args: string[] = [
-        "--ro-bind", "/usr", "/usr",
-        "--ro-bind", "/bin", "/bin",
-        "--ro-bind", "/lib", "/lib",
-      ];
-
-      if (fs.existsSync("/lib64")) {
-        args.push("--ro-bind", "/lib64", "/lib64");
-      }
-
-      if (fs.existsSync("/etc/resolv.conf")) {
-        args.push("--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf");
-      }
-
-      args.push(
+        ...baseArgs,
         "--proc", "/proc",
         "--dev", "/dev",
         "--tmpfs", "/tmp",
@@ -71,7 +102,7 @@ export class BwrapDriver implements SandboxDriver {
         "--unshare-all",
         "--die-with-parent",
         "bash", "-c", options.command,
-      );
+      ];
 
       const child = spawn("bwrap", args, {
         cwd: options.root,
@@ -134,8 +165,8 @@ export class DockerDriver implements SandboxDriver {
       const args = [
         "run", "--rm", "-i",
         "--network", "none",
-        "-v", `${options.root}:/workspace`,
-        "-w", "/workspace",
+        "-v", `${options.root}:${options.root}`,
+        "-w", options.root,
         "alpine:latest",
         "/bin/sh", "-c", options.command,
       ];
@@ -229,10 +260,10 @@ export function getSandboxDriver(): SandboxDriver {
 
   if (preferred === "bwrap" && bwrap.isAvailable()) return bwrap;
   if (preferred === "docker" && docker.isAvailable()) return docker;
-  if (preferred === "direct") return direct;
+  if (preferred === "direct" && process.env.CUBES_ALLOW_UNSAFE_DIRECT === "true") return direct;
 
-  // Auto-detection priority: bwrap -> docker -> direct fallback
+  // Auto-detection priority: bwrap -> docker. Never silently run on the host.
   if (bwrap.isAvailable()) return bwrap;
   if (docker.isAvailable()) return docker;
-  return direct;
+  return new UnavailableSandboxDriver();
 }

@@ -42,11 +42,18 @@ stop_process "scheduler"
 stop_process "web"
 stop_process "agent-core"
 
+# Clean up any lingering background processes for this workspace
+pkill -f "uvicorn main:app" 2>/dev/null || true
+pkill -f "next dev" 2>/dev/null || true
+pkill -f "scripts/scheduler.ts" 2>/dev/null || true
+
 # Release ports from registry if port-alloc is available
 PORT_ALLOC_BIN="$(command -v port-alloc 2>/dev/null || ( [[ -x "${HOME}/.local/bin/port-alloc" ]] && echo "${HOME}/.local/bin/port-alloc" ) || true)"
 if [[ -n "${PORT_ALLOC_BIN}" ]]; then
   "${PORT_ALLOC_BIN}" release "kubes-web" >/dev/null 2>&1 || true
   "${PORT_ALLOC_BIN}" release "kubes-agent-core" >/dev/null 2>&1 || true
 fi
+
+rm -rf "${PID_DIR}"/*
 
 echo "✅ All Kubes services stopped."

@@ -7,6 +7,7 @@ import { ArtifactCanvas, type ArtifactFile } from "@/components/artifact-canvas"
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Transcript } from "@/components/transcript";
 import type { Cube } from "@/lib/cubes/types";
+import { BROWSER_PROVIDER_UPDATED, getBrowserProviderSelection } from "@/components/provider-modal";
 
 export function CubeChat({
   cube,
@@ -26,6 +27,8 @@ export function CubeChat({
   const [input, setInput] = useState("");
   const [lastPrompt, setLastPrompt] = useState<string>("");
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null);
+  const [providerReady, setProviderReady] = useState(false);
+  const [streamSettled, setStreamSettled] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const onCubesChangedRef = useRef(onCubesChanged);
   const onComputerRef = useRef(onComputer);
@@ -33,14 +36,39 @@ export function CubeChat({
     onCubesChangedRef.current = onCubesChanged;
     onComputerRef.current = onComputer;
   });
-  const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: () => getBrowserProviderSelection(),
+        headers: () => {
+          const selection = getBrowserProviderSelection();
+          return {
+            ...(selection.providerId ? { "x-kubes-provider-id": selection.providerId } : {}),
+            ...(selection.providerKey ? { "x-kubes-provider-key": selection.providerKey } : {}),
+          };
+        },
+      }),
+    [],
+  );
   const { messages, sendMessage, status, stop, error } = useChat({
     id: threadId,
     messages: initialMessages,
     transport,
+    onFinish: () => setStreamSettled(true),
+    onError: () => setStreamSettled(true),
   });
 
-  const busy = status === "submitted" || status === "streaming";
+  const busy = !streamSettled && (status === "submitted" || status === "streaming");
+  const latestMessage = messages[messages.length - 1];
+  const latestAssistantHasText = latestMessage?.role === "assistant" && latestMessage.parts.some(
+    (part) => part.type === "text" && part.text.trim().length > 0,
+  );
+  const hasPendingTool = messages.some((message) =>
+    message.parts.some(
+      (part) => isToolUIPart(part) && (part.state === "input-streaming" || part.state === "input-available"),
+    ),
+  );
   const mutationKey = messages
     .flatMap((message) => message.parts)
     .flatMap((part) =>
@@ -63,9 +91,29 @@ export function CubeChat({
   }, [messages, status]);
 
   useEffect(() => {
+    if (!busy || !latestAssistantHasText || hasPendingTool) return;
+    const recoveryTimer = window.setTimeout(() => {
+      setStreamSettled(true);
+      stop();
+    }, 2000);
+    return () => window.clearTimeout(recoveryTimer);
+  }, [busy, hasPendingTool, latestAssistantHasText, stop]);
+
+  useEffect(() => {
     if (!mutationKey.includes("output-available")) return;
     onCubesChangedRef.current();
   }, [mutationKey]);
+
+  useEffect(() => {
+    const refreshProviderState = () => setProviderReady(Boolean(getBrowserProviderSelection().providerKey));
+    refreshProviderState();
+    window.addEventListener(BROWSER_PROVIDER_UPDATED, refreshProviderState);
+    window.addEventListener("storage", refreshProviderState);
+    return () => {
+      window.removeEventListener(BROWSER_PROVIDER_UPDATED, refreshProviderState);
+      window.removeEventListener("storage", refreshProviderState);
+    };
+  }, []);
 
   const follow = handoffSlug(messages);
   useEffect(() => {
@@ -75,6 +123,7 @@ export function CubeChat({
 
   function handleRetry() {
     if (lastPrompt && !busy) {
+      setStreamSettled(false);
       void sendMessage({ text: lastPrompt }, { body: { cubeId: cube.id, threadId } });
     }
   }
@@ -99,7 +148,8 @@ export function CubeChat({
           onSubmit={(event) => {
             event.preventDefault();
             const text = input.trim();
-            if (!text || busy) return;
+            if (!text || busy || !providerReady) return;
+            setStreamSettled(false);
             setLastPrompt(text);
             setInput("");
             void sendMessage({ text }, { body: { cubeId: cube.id, threadId } });
@@ -143,13 +193,16 @@ export function CubeChat({
             ) : (
               <button
                 type="submit"
-                disabled={!input.trim()}
+                disabled={!input.trim() || !providerReady}
                 className="mb-1 rounded-full bg-[#e7ff3a] px-3 py-2 text-sm font-medium text-black disabled:opacity-30"
               >
                 Send
               </button>
             )}
           </div>
+          {!providerReady ? (
+            <p className="mt-2 px-3 text-xs text-amber-300/80">Verify an AI provider key before sending a message.</p>
+          ) : null}
           <p className="mt-2 px-3 text-xs text-white/35">
             {busy ? `${cube.name} is writing…` : `${cube.name} · ${cube.model}`}
           </p>

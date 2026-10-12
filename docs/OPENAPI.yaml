@@ -1,0 +1,66 @@
+openapi: 3.0.3
+info:
+  title: Kubes Specialist Autonomous Platform API
+  description: REST API specification for Kubes multi-tenant autonomous specialist AI cubes, chat threads, scheduling, and jail execution.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+paths:
+  /api/cubes:
+    get:
+      summary: List accessible cubes for authenticated organization
+      responses:
+        '200':
+          description: List of cubes
+        '401':
+          description: Unauthorized
+    post:
+      summary: Create a new specialist cube
+      responses:
+        '201':
+          description: Cube created
+        '403':
+          description: Insufficient permissions
+  /api/cubes/{id}:
+    get:
+      summary: Get cube by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cube details
+        '404':
+          description: Cube not found
+  /api/schedules:
+    get:
+      summary: List scheduled tasks
+      responses:
+        '200':
+          description: List of schedules
+    post:
+      summary: Create a new scheduled task
+      responses:
+        '201':
+          description: Schedule created
+  /api/memories:
+    get:
+      summary: Query memories
+      responses:
+        '200':
+          description: List of memories
+    post:
+      summary: Save memory
+      responses:
+        '201':
+          description: Memory created
+  /api/digests:
+    get:
+      summary: List digests and configurations
+      responses:
+        '200':
+          description: Recent digests

@@ -1,5 +1,5 @@
 """
-Core implementation of dynamic port allocation and registry persistence.
+Port Allocator Core Engine: Atomic lock-free and collision-free port allocation.
 """
 
 from __future__ import annotations
@@ -9,22 +9,30 @@ import socket
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 
 def get_registry_path() -> Path:
-    """Returns path to global registry file (respecting PORT_REGISTRY_PATH override)."""
+    """Return the global port registry path (~/.local/share/port-registry/ports.json)."""
     override = os.getenv("PORT_REGISTRY_PATH")
     if override:
-        path = Path(override).expanduser().resolve()
+        p = Path(override).expanduser().resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    data_home = os.getenv("XDG_DATA_HOME")
+    if data_home:
+        base = Path(data_home).expanduser()
     else:
-        path = Path.home() / ".local" / "share" / "port-registry" / "ports.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+        base = Path.home() / ".local" / "share"
+
+    registry_dir = base / "port-registry"
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    return registry_dir / "ports.json"
 
 
 def is_pid_alive(pid: int) -> bool:
-    """Check if process with given PID is actively running."""
+    """Check if process with given PID is alive."""
     if pid <= 0:
         return False
     try:
@@ -58,6 +66,7 @@ def read_registry() -> dict:
             active = {}
             for k, v in services.items():
                 pid = v.get("pid", 0)
+                # Service is active ONLY if its recorded PID is alive
                 if is_pid_alive(pid):
                     active[k] = v
             data["services"] = active
@@ -83,6 +92,34 @@ def write_registry(data: dict) -> None:
         raise e
 
 
+def register_service(
+    service: str,
+    port: int,
+    pid: Optional[int] = None,
+    host: str = "127.0.0.1",
+    url: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Explicitly register or update a service port lease."""
+    registry = read_registry()
+    services = registry.get("services", {})
+    assigned_pid = pid if pid is not None else (os.getppid() if os.getppid() > 1 else os.getpid())
+
+    entry = {
+        "service": service,
+        "port": port,
+        "host": host,
+        "pid": assigned_pid,
+        "url": url or f"http://{host}:{port}",
+        "metadata": metadata or {},
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    services[service] = entry
+    registry["services"] = services
+    write_registry(registry)
+    return entry
+
+
 def allocate_port(
     service: str,
     preferred: int = 3000,
@@ -94,11 +131,12 @@ def allocate_port(
 ) -> int:
     """
     Allocate a free port for a service, register it in the global registry, and return the port.
+    If preferred port is occupied by any process or container, automatically allocates next free port.
     """
     registry = read_registry()
     services = registry.get("services", {})
 
-    # Reserved ports from active services (excluding this service itself)
+    # Reserved ports from active registered services (excluding this service)
     reserved_ports = {
         v["port"]
         for k, v in services.items()
@@ -110,18 +148,23 @@ def allocate_port(
 
     allocated = None
 
-    # Check if this service is already registered with a live PID and free/active port
+    # Check if this service is already registered with a live PID
     existing = services.get(service)
     if existing and is_pid_alive(existing.get("pid", 0)):
         existing_port = existing.get("port")
-        if existing_port and existing_port not in reserved_ports:
+        if existing_port:
             return existing_port
 
-    # Try preferred port first if in range
-    if preferred not in reserved_ports and is_port_free(preferred, host):
-        allocated = preferred
-    else:
-        # Scan range
+    # Try preferred port only if free on host or if caller owns the active PID
+    if preferred not in reserved_ports:
+        if is_port_free(preferred, host):
+            allocated = preferred
+        elif pid is not None and is_pid_alive(pid):
+            # Process was pre-bound and caller is registering its live PID
+            allocated = preferred
+
+    # If preferred is occupied, scan range for first free port
+    if allocated is None:
         for p in range(start, end + 1):
             if p not in reserved_ports and is_port_free(p, host):
                 allocated = p

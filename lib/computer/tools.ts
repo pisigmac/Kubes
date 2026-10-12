@@ -12,7 +12,7 @@ import {
 } from "./jail.ts";
 
 
-type Actor = { slug: string; name: string; isMaestro: boolean };
+type Actor = { slug: string; name: string; isMaestro: boolean; orgId?: string; userId?: string | null };
 
 function failed(error: unknown): { ok: false; summary: string } {
   const summary = error instanceof Error ? error.message : "The computer could not do that.";
@@ -20,14 +20,15 @@ function failed(error: unknown): { ok: false; summary: string } {
 }
 
 export function computerTools(actor: Actor) {
-  const own = () => ensureWorkspace(actor.slug, actor.isMaestro);
+  const orgId = actor.orgId || "default";
+  const own = () => ensureWorkspace(actor.slug, actor.isMaestro, orgId);
   return {
     computer_exec: tool({
       description: "Run one shell command in this Cube's directory on the shared computer.",
       inputSchema: z.object({ command: z.string() }),
       execute: async ({ command }) => {
         try {
-          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command);
+          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command, orgId);
           const summary = `Ran \`${command.slice(0, 80)}\` (${result.exitCode ?? "stopped"})`;
           return { ok: result.exitCode === 0, summary, ...result };
         } catch (error) {
@@ -45,7 +46,7 @@ export function computerTools(actor: Actor) {
       }),
       execute: async ({ cube, path }) => {
         try {
-          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug);
+          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug, orgId);
           const start = path ? resolveInside(root, path) : root;
           const entries = listTree(start);
           return { ok: true, summary: `Listed ${path || cube || actor.slug}`, entries };
@@ -64,7 +65,7 @@ export function computerTools(actor: Actor) {
       }),
       execute: async ({ path, cube }) => {
         try {
-          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug);
+          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug, orgId);
           const file = readText(root, path);
           return {
             ok: true,
@@ -94,7 +95,7 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ url: z.string() }),
       execute: async ({ url }) => {
         try {
-          const page = await browse(actor.name, url);
+          const page = await browse(actor.name, url, orgId);
           return { ok: true, summary: `Opened ${page.url}`, ...page };
         } catch (error) {
           return failed(error);
@@ -106,7 +107,7 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ target: z.string() }),
       execute: async ({ target }) => {
         try {
-          const url = await clickPage(actor.name, target);
+          const url = await clickPage(actor.name, target, orgId);
           return { ok: true, summary: `Clicked ${target}`, url };
         } catch (error) {
           return failed(error);
@@ -118,7 +119,7 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ text: z.string(), target: z.string().optional() }),
       execute: async ({ text, target }) => {
         try {
-          await typePage(actor.name, text, target);
+          await typePage(actor.name, text, target, orgId);
           return { ok: true, summary: "Typed into the page" };
         } catch (error) {
           return failed(error);

@@ -17,6 +17,7 @@ import {
   listSchedules,
   updateSchedule,
 } from "../computer/schedule.ts";
+import type { ResourceScope } from "../auth/deskid.ts";
 
 
 function rosterText(cubes: Cube[]): string {
@@ -52,13 +53,18 @@ Tasks & Scheduling: When the user describes an ongoing routine, recurring check,
 ${cube.isMaestro ? "You may read every Cube's files by slug. You cannot write their files. Hand the owner the change.\n" : ""}${handoff ? "handoff sends one other Cube a self-contained goal. Their reply is already on screen. Do not paste it. They will not hand the task onward.\n" : ""}Job hunt owns listings, applications, and follow-ups. Work owns the job the user already has.`;
 }
 
-function manageTools() {
+function cubeScope(cube: Cube): ResourceScope {
+  return { orgId: cube.orgId || "default", userId: cube.userId };
+}
+
+function manageTools(currentCube: Cube) {
+  const scope = cubeScope(currentCube);
   return {
     list_cubes: tool({
       description: "List every Cube: slug, name, pain point, instructions, and model.",
       inputSchema: z.object({}),
       execute: async () => ({
-        cubes: listCubes().map(publicCube),
+        cubes: listCubes(scope).map(publicCube),
       }),
     }),
     create_cube: tool({
@@ -76,6 +82,9 @@ function manageTools() {
             painPoint,
             instructions,
             model: await coerceModel(model),
+            orgId: scope.orgId,
+            userId: currentCube.userId,
+            scope,
           });
           return { ok: true, cube };
         } catch (error) {
@@ -93,7 +102,7 @@ function manageTools() {
         model: z.string().optional(),
       }),
       execute: async ({ slug, name, painPoint, instructions, model }): Promise<CubeMutationResult> => {
-        const cube = getCubeBySlug(slug.trim());
+        const cube = getCubeBySlug(slug.trim(), scope);
         if (!cube) return { ok: false, error: `No Cube with slug "${slug}".` };
         if (name === undefined && painPoint === undefined && instructions === undefined && model === undefined) {
           return { ok: false, error: "Nothing to change." };
@@ -104,7 +113,8 @@ function manageTools() {
             painPoint,
             instructions,
             model: model === undefined ? undefined : await coerceModel(model),
-          });
+            scope,
+          }, scope);
           return { ok: true, cube: updated };
         } catch (error) {
           return { ok: false, error: failure(error) };
@@ -115,6 +125,7 @@ function manageTools() {
 }
 
 function handoffTool(caller: Cube) {
+  const scope = cubeScope(caller);
   return tool({
     description:
       "Hand the user's goal to exactly one other Cube by slug. The Cube's reply is shown in the transcript. Do not hand it to yourself.",
@@ -125,7 +136,7 @@ function handoffTool(caller: Cube) {
         .describe("Self-contained goal, including constraints and details from the conversation"),
     }),
     execute: async function* ({ slug, goal }, { abortSignal }) {
-      const cube = getCubeBySlug(slug.trim());
+      const cube = getCubeBySlug(slug.trim(), scope);
       if (!cube || cube.slug === caller.slug) {
         const missing: HandoffResult = {
           ok: false,
@@ -182,6 +193,7 @@ function handoffTool(caller: Cube) {
 }
 
 function scheduleTools(cube: Cube) {
+  const scope = cubeScope(cube);
   return {
     list_tasks: tool({
       description: "List scheduled tasks and automated runs for this Cube.",
@@ -190,9 +202,9 @@ function scheduleTools(cube: Cube) {
       }),
       execute: async ({ cubeSlug }) => {
         try {
-          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim()) : cube;
+          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim(), scope) : cube;
           if (!target) return { ok: false, error: `Cube not found.` };
-          const schedules = listSchedules(target.id);
+          const schedules = listSchedules(target.id, scope);
           return {
             ok: true,
             summary: `Found ${schedules.length} scheduled task(s) for ${target.name}.`,
@@ -220,12 +232,13 @@ function scheduleTools(cube: Cube) {
       }),
       execute: async ({ cron, instruction, cubeSlug }) => {
         try {
-          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim()) : cube;
+          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim(), scope) : cube;
           if (!target) return { ok: false, error: `Cube not found.` };
           const created = createSchedule({
             cubeId: target.id,
             cron,
             instruction,
+            scope,
           });
           return {
             ok: true,
@@ -253,7 +266,7 @@ function scheduleTools(cube: Cube) {
       }),
       execute: async ({ taskId, cron, instruction, enabled }) => {
         try {
-          const updated = updateSchedule(taskId, { cron, instruction, enabled });
+          const updated = updateSchedule(taskId, { cron, instruction, enabled }, scope);
           return {
             ok: true,
             summary: `Updated scheduled task (${updated.cron})`,
@@ -277,7 +290,7 @@ function scheduleTools(cube: Cube) {
       }),
       execute: async ({ taskId }) => {
         try {
-          deleteSchedule(taskId);
+          deleteSchedule(taskId, scope);
           return { ok: true, summary: "Deleted scheduled task." };
         } catch (error) {
           return { ok: false, error: failure(error) };
@@ -295,27 +308,33 @@ function activityLine(output: unknown): string {
   return "Used the computer";
 }
 
-function buildCubeAgent(cube: Cube, options: { handoff: boolean; manage: boolean }) {
-  const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes())}` : "";
+function buildCubeAgent(
+  cube: Cube,
+  options: { handoff: boolean; manage: boolean },
+  providerKey?: string,
+  providerId?: string,
+) {
+  const orgId = cube.orgId || "default";
+  const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
   return new ToolLoopAgent({
-    model: languageModel(cube.model),
+    model: languageModel(cube.model, providerKey, providerId),
     instructions: `${cube.instructions}\n\n${computerBlock(cube, options.handoff)}${roster}`,
     tools: {
-      ...computerTools({ slug: cube.slug, name: cube.name, isMaestro: cube.isMaestro }),
+      ...computerTools({ slug: cube.slug, name: cube.name, isMaestro: cube.isMaestro, orgId: cube.orgId, userId: cube.userId }),
       ...scheduleTools(cube),
       ...(options.handoff ? { handoff: handoffTool(cube) } : {}),
-      ...(options.manage ? manageTools() : {}),
+      ...(options.manage ? manageTools(cube) : {}),
     },
     stopWhen: isStepCount(options.manage ? 16 : 12),
   });
 }
 
-export function buildMaestroAgent(cube: Cube) {
-  return buildCubeAgent(cube, { handoff: true, manage: true });
+export function buildMaestroAgent(cube: Cube, providerKey?: string, providerId?: string) {
+  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId);
 }
 
-export function buildSpecialistAgent(cube: Cube) {
-  return buildCubeAgent(cube, { handoff: true, manage: false });
+export function buildSpecialistAgent(cube: Cube, providerKey?: string, providerId?: string) {
+  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId);
 }
 
 export async function runCubeInstruction(

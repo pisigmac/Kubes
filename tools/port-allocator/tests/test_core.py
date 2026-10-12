@@ -67,3 +67,18 @@ def test_dead_pid_reaping(temp_registry):
     # Calling read_registry or list_services should reap dead_pid
     services = list_services()
     assert "svc-dead" not in services
+
+
+def test_allocate_for_live_bound_pid(temp_registry):
+    # Simulate a process already listening on a socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        bound_port = s.getsockname()[1]
+
+        # When allocating with our live PID for this bound port, it should register bound_port
+        allocated = allocate_port("my-bound-service", preferred=bound_port, pid=os.getpid())
+        assert allocated == bound_port
+
+        svc = get_service("my-bound-service")
+        assert svc is not None
+        assert svc["port"] == bound_port

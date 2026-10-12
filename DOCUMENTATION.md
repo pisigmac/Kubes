@@ -2,7 +2,7 @@
 
 > **Core Concept:** **Kubes are AI Agents**, not tasks. Each Cube is an autonomous, persistent AI specialist with its own persona, instructions, reasoning models, and sandboxed workspace. **Tasks** are the specific instructions, goals, or recurring scheduled routines that users assign to these AI agents.
 
-**Kubes** is a local multi-agent intelligence app. One person uses it in a browser. There is no account and no shared server.
+**Kubes** is a local multi-agent intelligence app. In standalone mode, one person uses it in a browser with no account or shared server. In DeskID mode, protected requests require cryptographically verified identity and organization scope.
 
 
 **Maestro** is the coordinator Cube (AI Agent) you start in. It routes work, and it can create or retune the others. The specialist AI agents are Focus, Money, Work, Job hunt, Body, Learn, Write, Life admin, and Calm. You can talk to any of them directly. Any Cube can hand one task or workflow to one other Cube. That handoff stops there: the receiver does not hand it on.
@@ -10,9 +10,9 @@
 
 Each Cube remembers its own name, pain point, instructions, and model. The next message uses whatever was saved.
 
-There is one workspace computer, not one machine per Cube, and not your desktop. Files are separated by directory. The browser and the terminal share one seat.
+There is one workspace computer, not one machine per Cube, and not your desktop. Files are separated by organization and Cube directory. Browser profiles and screenshots are organization-scoped; the browser and terminal still share one seat per running process.
 
-`plan.md` is the original build spec. It still says the computer is later work. This file is the current behavior. Proposed next work is in `future_plan.md`.
+This file documents current behavior. Proposed product-quality follow-up work is tracked in `CUBES_PRODUCT_QUALITY_REVIEW.md`.
 
 ## Run it
 
@@ -32,7 +32,7 @@ The key and the base URL must belong to the same provider. The model list can lo
 | `OPENAI_MODEL` | Model stored on a Cube that has no other choice, and the fallback when a requested id is rejected. Default `grok-4.7`. |
 | `CUBES_CHROME` | Browser binary. Default `/usr/bin/google-chrome`. |
 | `CUBES_COMPUTER_ROOT` | Workspace root. Default `data/computer`. |
-| `CUBES_SEAT_WAIT_MS` | How long a Cube waits for the browser or terminal. Default 20000. |
+| `CUBES_SEAT_WAIT_MS` | How long a Cube waits for the browser or terminal. Default 35000. |
 
 `data/` is gitignored. It holds `cubes.db` and the computer directories. Deleting it reseeds the catalog and drops chats, files, and schedules.
 
@@ -101,10 +101,11 @@ The transcript shows a "handed to {name}" chip, then the receiver's reply. Compu
 
 ```
 data/computer/
-  home/            Maestro. TOOLS.md and notes/ appear on first use.
-  cubes/<slug>/    Every other Cube, same shape.
-  chrome/          One Chrome profile.
-  shots/latest.png One screenshot, replaced each time a page is opened.
+  orgs/<org-id>/
+    home/            Maestro. TOOLS.md and notes/ appear on first use.
+    cubes/<slug>/    Every other Cube, same shape.
+    chrome/          Organization-scoped Chrome profile.
+    shots/latest.png Organization-scoped latest screenshot.
 ```
 
 There is no shared drop folder. Maestro can read every directory and cannot write or execute in anyone else's. File reads and Maestro's reads do not take the seat. The browser and the terminal do. If the seat is still busy after the wait, the tool returns "Computer is in use by {Name}."
@@ -134,7 +135,7 @@ A new Cube's slug comes from its name and stays unique. The slug does not follow
 
 ## HTTP
 
-All of these are local and unauthenticated.
+In standalone mode (`AUTH_MODE=none`), these local routes use the default local scope. In DeskID mode, protected routes require a Bearer token or `deskid_session` cookie; the server verifies the token and derives organization scope from it. Mutating routes require the `editor` role. Viewer access is read-only.
 
 | Request | Body or query | Result |
 | --- | --- | --- |
@@ -177,11 +178,11 @@ Kubes is designed to interface with complementary specialized modules in the eco
 
 | Project | Role in Kubes Ecosystem | Integration Pattern |
 | :--- | :--- | :--- |
-| **`DeskID`** | **Identity, Auth & Multi-Tenancy**: RS256 JWKS authentication, OAuth, role-based Cube access control, and organization tenancy. | Next.js `middleware.ts` stateless token verification when `AUTH_MODE=deskid`. |
-| **`capsule`** | **Local Atomic Fact Memory**: Stores facts as Git-traceable Markdown files with SQLite FTS5 index. | Mounted in `data/computer/notes/` for sub-millisecond local recall without heavy vector databases. |
-| **`tracelens`** | **Agent Observability & Cost Tracking**: Tracks token consumption, latency per tool step, and costs. | Integrated in `lib/cubes/runtime.ts` via the `tracelens-ai` npm SDK. |
-| **`keymint`** | **Zero-Trust API Key Gateway**: Protects master provider keys, enforces budgets, and rate-limits agents. | Kubes points `OPENAI_BASE_URL` to KeyMint Go proxy (`http://localhost:8080/v1`). |
-| **`kubemind`** | **Enterprise Governance & Control Plane**: Zero-egress PII masking (ONNX BERT NER), Sentinel audit ledger. | Enterprise mode backend via `@kubemind/sdk` and native Model Context Protocol (MCP) server. |
+| **`DeskID`** | **Identity adapter**: authentication-mode switch, JWKS-backed token verification, RBAC, and organization tenancy. | Server-side route authentication and scoped persistence/filesystem/browser access when `AUTH_MODE=deskid`; issuer/JWKS deployment configuration remains environment-specific. |
+| **`capsule`** | **Planned local memory integration**. | No Capsule package or verified mounted FTS5 integration is present in the main application. |
+| **`tracelens`** | **Planned observability integration**: token, latency, and cost tracking. | No `tracelens-ai` dependency or verified runtime integration is present in this repository. |
+| **`keymint`** | **Optional gateway configuration**. | Provider definitions recognize KeyMint, but a KeyMint service is not included or required by the default local setup. |
+| **`kubemind`** | **Optional companion service**. | A Python adapter exists under `services/agent-core`; the main Next.js chat runtime does not automatically provide the described enterprise governance guarantees. |
 
 ## Limits that are on purpose
 
@@ -192,3 +193,96 @@ Kubes is designed to interface with complementary specialized modules in the eco
 - Schedules do not use the system crontab. They die when the Next process dies.
 - The jail is not a container.
 
+## Product Quality Review & QA Audit
+
+### Executive Summary of the Review
+
+| Issue # | Concern in Report | Verdict | Current Codebase Status |
+| :---: | :--- | :---: | :--- |
+| **1.1** | **Tablet UI Lockout (768px–1023px)** | **Likely fixed; browser verification required** | Editor cancel/backdrop controls were added in `components/cube-editor.tsx` and `components/cubes-app.tsx`. Confirm with a real tablet-width keyboard and touch test. |
+| **1.2** | **Header Model Selector Bypass** | **Improved; not fully verified** | Model changes are persisted through the Cube API and provider routing supports model prefixes. Add an end-to-end test proving the selected model is used for the next chat. |
+| **1.3** | **Blind Thread Overwrite (`saveThreadMessages`)** | **Open** | `lib/cubes/store.ts` still deletes and reinserts all messages for a thread. Rapid concurrent turns can overwrite messages. |
+| **1.4** | **Scheduled Runs Lack Tool History / Transcripts** | **Partially addressed** | `lib/computer/schedule.ts` persists the scheduled prompt, assistant reply, status, and digest summary. It does not persist the complete tool-call/activity trace. |
+| **2.1** | **SSRF Bypass in Browser Engine** | **Improved; not proven complete** | Request interception now checks `assertPublicUrl` for browser requests. DNS rebinding, redirects, browser downloads, and all network-capable paths still need dedicated tests. |
+| **2.2** | **Shell Jail Regex/String Blacklist Bypass** | **Improved; deployment validation required** | Computer execution now fails closed when no usable Bubblewrap/Docker sandbox is available. Direct execution requires the explicit `CUBES_ALLOW_UNSAFE_DIRECT=true` override and is not a security sandbox. |
+| **3.1** | **Concurrent Chat Stream Collisions** | **Open** | `app/api/chat/route.ts` tracks Cube busy state but does not reject or queue a second user request while one is streaming. |
+| **3.2** | **Seat Waiter Timeout Inversion (20s vs 30s)** | **Fixed in code; documentation corrected** | The code default is `35_000ms`, which exceeds the `30_000ms` command timeout. Environment overrides can still change this behavior. |
+| **3.3** | **Terminal Command History Lost on Reboot** | **Fixed in code** | Terminal commands are written to and read from the SQLite `command_logs` table. This does not make logs encrypted or tenant-scoped. |
+| **4.1** | **Lack of Markdown Parser in Transcript** | **Implemented; browser verification required** | `components/transcript.tsx` uses the Markdown viewer and artifact rendering. Confirm code-copy, malformed markdown, long output, and mobile behavior in the browser. |
+| **4.2** | **Sidebar Real Estate on 1080p Screens** | **Open** | When Sidebar, Computer Pane, and Tune Drawer are all open on a standard laptop, the chat area can become too narrow. |
+
+---
+
+### Detailed Technical Verification of the Top Concerns
+
+#### ✅ 1. P0-1: DeskID JWT Signature Verification
+* **Current implementation:** `lib/auth/deskid.ts` verifies the JWT signature against the configured JWKS endpoint and validates the required authentication claims.
+* **Codebase Reality ([`lib/auth/deskid.ts:48-67`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/lib/auth/deskid.ts#L48-L67)):**
+  ```typescript
+  const parts = token.split(".");
+  // ...
+  const payloadJson = decodeBase64Url(parts[1]); // Decodes payload only!
+  const claims = JSON.parse(payloadJson) as DeskIDTokenClaims;
+  // Signature in parts[2] is completely ignored!
+  ```
+* **Verdict:** **Resolved in code.** `lib/auth/deskid.ts` now verifies signatures through the configured JWKS endpoint and validates issuer, audience, expiration, not-before, subject, and `org_id`. Runtime validation still requires the repository tests and a real DeskID issuer/JWKS configuration.
+
+---
+
+#### ✅ 2. P0-2: Multi-Tenancy & Authorization
+* **Current implementation:** Server-side authentication derives organization scope, tenant columns are migrated into persistence tables, and protected resource queries include `org_id` predicates.
+* **Codebase Reality ([`lib/db.ts:11-85`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/lib/db.ts#L11-L85)):**
+  - Tables `cubes`, `threads`, `messages`, `schedules`, `memories`, `digests`, and `command_logs` have **no `user_id` or `org_id` columns**.
+  - Any user can read/write any other user's threads or files simply by providing the ID.
+* **Verdict:** **Resolved in code.** Tenant columns, migrations, scoped store queries, protected routes, and organization-partitioned filesystem/browser artifacts are implemented. Continue enforcing cross-tenant negative tests for new APIs; organization scope does not automatically provide user-level isolation within one organization.
+
+---
+
+#### 🔴 3. P0-3: The "Sandbox" Silently Falls Back to Direct Host Execution
+* **Review Claim:** When `bwrap` (Bubblewrap) or Docker are absent, the system falls back to `DirectFallbackDriver`, running unconfined `bash -c` in the host account with only naive string filters in `jail.ts`.
+* **Codebase Reality ([`lib/computer/sandbox.ts`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/lib/computer/sandbox.ts) & [`lib/computer/jail.ts:111`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/lib/computer/jail.ts#L111)):**
+  - `banned = [".env", "cubes.db", "/proc/", "/etc/", ...]` in `jail.ts` is easily bypassed using basic shell obfuscation (e.g. `base64 -d`, shell variables `$DIR/passwd`, wildcards, or symlinks).
+* **Verdict:** **Fail-closed behavior resolved.** Direct execution remains unsafe by design and must stay disabled outside controlled developer environments. OS-level sandbox deployment and prompt-injection testing remain required before broad release.
+
+---
+
+#### ✅ 4. P0-4: Browser State & Cookies Across Organizations
+* **Current implementation:** Browser processes, profiles, and screenshots are keyed by organization. The browser seat remains shared within one organization.
+* **Codebase Reality ([`lib/computer/browser.ts:10-31`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/lib/computer/browser.ts#L10-L31)):**
+  ```typescript
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+  // Uses chromeDir() for all cubes
+  ```
+* **Verdict:** **Resolved at organization boundary.** Browser processes, profiles, and screenshots are keyed by organization. Cubes and users within one organization still share that organization's browser seat and session; use per-user or per-task contexts if that isolation is required later.
+
+---
+
+#### 🟠 5. P1-1: Provider Modal "Verify" Does Not Activate or Persist Keys
+* **Review Claim:** The 🔑 Providers modal allows pasting and verifying a key via `/api/providers`, but the key is never saved to runtime state or disk.
+* **Codebase Reality ([`components/provider-modal.tsx`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/components/provider-modal.tsx) & [`app/api/providers/route.ts`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/app/api/providers/route.ts)):**
+  - The modal tests `/models` connectivity with the pasted key in-memory.
+  - The chat route ([`app/api/chat/route.ts`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/app/api/chat/route.ts)) still resolves keys from `process.env`. The user assumes they "switched providers", but subsequent chats fail with 401.
+* **Verdict:** **Confirmed open.**
+
+---
+
+#### 🟠 6. P2-1: Brand Identity & Naming Inconsistencies
+* **Review Claim:** Code, UI, tests, and documentation randomly switch between `Kubes`, `Cubes`, and `Kube`.
+* **Codebase Reality:**
+  - `package.json` $\rightarrow$ `"name": "kubes"`
+  - `scripts/scheduler.ts` $\rightarrow$ `"Kubes Background Task Scheduler"`
+  - `lib/db.ts` $\rightarrow$ `"cubes.db"`
+  - `components/cubes-app.tsx` $\rightarrow$ `<title>Cubes</title>`
+* **Verdict:** **Confirmed open.**
+
+---
+
+### Summary Recommendation
+
+The review's release recommendation is spot-on:
+
+1. **Positioning:** Standalone mode remains a **Single-User Local Desktop Beta** on `localhost:3000`. DeskID mode adds server-side authentication and organization scoping, but production deployment still requires environment-specific issuer/JWKS, sandbox, and operational validation.
+2. **Sandbox Enforcement:** If `bwrap` / container isolation is unavailable on the host OS, **disable computer tool execution by default** rather than silently running raw `bash -c`.
+3. **Provider Activation:** Separate key verification from activation. Provide an explicit, documented activation path using an encrypted local store or a deliberate `.env.local` configuration step; do not imply that verification changes the active chat provider.
+4. **Browser Isolation:** Refactor `browser.ts` to use ephemeral incognito browser contexts (`browser.createBrowserContext()`) per task.

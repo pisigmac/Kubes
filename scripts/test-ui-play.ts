@@ -21,7 +21,7 @@ async function findActiveWebPort(): Promise<number> {
 
   for (const p of candidates) {
     try {
-      const res = await fetch(`http://localhost:${p}/api/models`);
+      const res = await fetch(`http://127.0.0.1:${p}/api/models`);
       if (res.ok) {
         const data = await res.json();
         if (data && (Array.isArray(data.models) || Array.isArray(data.ids))) {
@@ -37,7 +37,7 @@ async function findActiveWebPort(): Promise<number> {
 
 async function main() {
   const port = await findActiveWebPort();
-  const url = `http://localhost:${port}`;
+  const url = `http://127.0.0.1:${port}`;
 
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log("🎭 Running Kubes End-to-End UI Test Playbook");
@@ -62,10 +62,15 @@ async function main() {
   try {
     // 1. Navigation & Initial Load
     process.stdout.write("1. Loading Kubes Web UI... ");
-    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    const response = await page.goto(url, { waitUntil: "networkidle0", timeout: 30000 });
     if (!response || !response.ok()) {
       throw new Error(`Page failed to load (HTTP ${response?.status()})`);
     }
+    await page.waitForFunction(
+      () => document.readyState === "complete" && Boolean(document.querySelector("nav button")),
+      { timeout: 10000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
     console.log("✅ OK");
 
     // 2. Verify Sidebar Specialists
@@ -102,6 +107,26 @@ async function main() {
     headerText = await page.evaluate(() => document.querySelector("header h1")?.textContent || "");
     if (!headerText.includes("Money")) throw new Error("Header did not switch to Money");
     console.log("✅ OK (Seamless context switching)");
+
+    // 3b. Testing New Cube & Cancel Dismissal
+    process.stdout.write("3b. Testing 'New Cube' flow and 'Cancel' dismissal... ");
+    await page.evaluate(() => {
+      const newBtn = Array.from(document.querySelectorAll("nav button")).find((b) => b.textContent?.includes("New Cube"));
+      (newBtn as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    const newCubeHeading = await page.evaluate(() => document.querySelector("header h1")?.textContent || "");
+    if (!newCubeHeading.includes("New Cube")) throw new Error("Did not enter New Cube mode");
+
+    // Click Cancel in the header or form
+    await page.evaluate(() => {
+      const cancelBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Cancel");
+      (cancelBtn as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    headerText = await page.evaluate(() => document.querySelector("header h1")?.textContent || "");
+    if (headerText.includes("New Cube")) throw new Error("Cancel button failed to exit New Cube mode");
+    console.log("✅ OK (Enter and cancel New Cube mode)");
 
     // 4. Memory Explorer Modal Interaction (Full CRUD)
     process.stdout.write("4. Testing Memory Explorer Modal (Search, Categories, Add, List, Delete)... ");
@@ -166,6 +191,31 @@ async function main() {
     });
     console.log("✅ OK (Modal, filter pills, CRUD & cleanup verified)");
 
+    // 4b. Testing Providers & KeyMint Gateway Modal
+    process.stdout.write("4b. Testing Providers & KeyMint Modal (Status, Live Test, Model Selection)... ");
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("header button"));
+      const provBtn = buttons.find((b) => b.textContent?.includes("Providers"));
+      (provBtn as HTMLElement)?.click();
+    });
+    await page.waitForSelector("h2", { timeout: 5000 });
+    const provModalText = await page.evaluate(() => document.body.innerText);
+    if (!provModalText.includes("AI Provider & KeyMint Gateway")) {
+      throw new Error("Providers & KeyMint modal did not open");
+    }
+    if (!provModalText.includes("Google Gemini") && !provModalText.includes("Groq")) {
+      throw new Error("Provider list missing key free providers in modal");
+    }
+
+    // Close Providers modal
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      const closeBtn = buttons.find((b) => b.textContent?.trim() === "Close" || b.textContent?.trim() === "✕");
+      (closeBtn as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    console.log("✅ OK (Provider modal & multi-provider cards verified)");
+
     // 5. Tune Drawer & Specialist Configuration
     process.stdout.write("5. Testing Tune Drawer (Model selector, Persona, Schedules)... ");
     const tuneVisible = await page.evaluate(() => {
@@ -227,4 +277,3 @@ async function main() {
 }
 
 main();
-

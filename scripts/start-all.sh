@@ -41,8 +41,10 @@ if [[ -f "${PID_DIR}/agent-core.pid" ]] && kill -0 "$(cat "${PID_DIR}/agent-core
   echo "⚠️  Agent Core is already running (PID: $(cat "${PID_DIR}/agent-core.pid"))"
 else
   echo "▶ Starting Python Agent Core (port ${AGENT_CORE_PORT})..."
-  (cd "${ROOT_DIR}/services/agent-core" && uv run uvicorn main:app --host 127.0.0.1 --port "${AGENT_CORE_PORT}" > "${LOG_DIR}/agent-core.log" 2>&1 & echo $! > "${PID_DIR}/agent-core.pid")
-  sleep 1
+  echo "${AGENT_CORE_PORT}" > "${PID_DIR}/agent-core.port"
+  (cd "${ROOT_DIR}/services/agent-core" && exec uv run uvicorn main:app --host 127.0.0.1 --port "${AGENT_CORE_PORT}") > "${LOG_DIR}/agent-core.log" 2>&1 &
+  echo $! > "${PID_DIR}/agent-core.pid"
+  sleep 1.5
   if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/agent-core.pid" ]]; then
     "${PORT_ALLOC_BIN}" allocate --service "kubes-agent-core" --preferred "${AGENT_CORE_PORT}" --pid "$(cat "${PID_DIR}/agent-core.pid")" >/dev/null 2>&1 || true
   fi
@@ -53,8 +55,10 @@ if [[ -f "${PID_DIR}/web.pid" ]] && kill -0 "$(cat "${PID_DIR}/web.pid")" 2>/dev
   echo "⚠️  Next.js Web is already running (PID: $(cat "${PID_DIR}/web.pid"))"
 else
   echo "▶ Starting Next.js Web App (port ${WEB_PORT})..."
-  (cd "${ROOT_DIR}" && PORT="${WEB_PORT}" AGENT_CORE_URL="http://127.0.0.1:${AGENT_CORE_PORT}" pnpm dev -p "${WEB_PORT}" > "${LOG_DIR}/web.log" 2>&1 & echo $! > "${PID_DIR}/web.pid")
-  sleep 1
+  echo "${WEB_PORT}" > "${PID_DIR}/web.port"
+  PORT="${WEB_PORT}" AGENT_CORE_URL="http://127.0.0.1:${AGENT_CORE_PORT}" pnpm dev -H 127.0.0.1 -p "${WEB_PORT}" > "${LOG_DIR}/web.log" 2>&1 &
+  echo $! > "${PID_DIR}/web.pid"
+  sleep 1.5
   if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/web.pid" ]]; then
     "${PORT_ALLOC_BIN}" allocate --service "kubes-web" --preferred "${WEB_PORT}" --pid "$(cat "${PID_DIR}/web.pid")" >/dev/null 2>&1 || true
   fi
@@ -65,7 +69,8 @@ if [[ -f "${PID_DIR}/scheduler.pid" ]] && kill -0 "$(cat "${PID_DIR}/scheduler.p
   echo "⚠️  Scheduler Daemon is already running (PID: $(cat "${PID_DIR}/scheduler.pid"))"
 else
   echo "▶ Starting Scheduler Daemon..."
-  (cd "${ROOT_DIR}" && pnpm run schedules > "${LOG_DIR}/scheduler.log" 2>&1 & echo $! > "${PID_DIR}/scheduler.pid")
+  node --experimental-strip-types "${ROOT_DIR}/scripts/scheduler.ts" > "${LOG_DIR}/scheduler.log" 2>&1 &
+  echo $! > "${PID_DIR}/scheduler.pid"
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
