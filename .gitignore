@@ -24,6 +24,8 @@
 .DS_Store
 *.pem
 backlog/
+backlog.d/
+docs/BACKLOG.md
 PROPOSED*.md
 # debug
 npm-debug.log*
@@ -44,6 +46,18 @@ next-env.d.ts
 
 # local sqlite & computer workspace
 /data
+/.pids
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
 
 # IDE and assistant configuration
 .cursor/
@@ -55,3 +69,6 @@ AGENTS.md
 # Planning docs
 plan.md
 future_plan.md
+CUBES_PRODUCT_QUALITY_REVIEW.md
+DESKID_KUBES_TENANCY_IMPLEMENTATION_GUIDE.md
+

@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   // Dev HMR and the RSC debug channel reject 127.0.0.1 unless it is listed.
   // Without this, Chrome on that host never finishes hydration.
   allowedDevOrigins: ["127.0.0.1"],
+  output: "standalone",
 };
+
 
 export default nextConfig;

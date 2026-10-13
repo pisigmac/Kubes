@@ -1,16 +1,37 @@
 import type { UIMessage } from "ai";
-import { db } from "@/lib/db";
-import { seedByKey } from "@/lib/cubes/catalog";
-import { defaultModel } from "@/lib/ai/provider";
-import type { Cube, Thread } from "@/lib/cubes/types";
+import { db } from "../db.ts";
+import { seedByKey } from "./catalog.ts";
+import { defaultModel } from "../ai/provider.ts";
+import type { Cube, Thread } from "./types.ts";
+import { getAuthMode, type ResourceScope } from "../auth/deskid.ts";
 
 export class HttpError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
     super(message);
+    this.status = status;
   }
+}
+
+export function resolveScope(scope?: ResourceScope | string): { orgId: string; userId: string | null } {
+  const mode = getAuthMode();
+  if (mode === "deskid") {
+    if (!scope) {
+      throw new HttpError("ResourceScope with valid orgId is required in enterprise DeskID mode", 401);
+    }
+    const org = typeof scope === "string" ? scope.trim() : (scope.orgId || "").trim();
+    if (!org) {
+      throw new HttpError("DeskID tenant orgId is required and cannot be empty", 401);
+    }
+    const user = typeof scope === "object" ? (scope.userId ?? null) : null;
+    return { orgId: org, userId: user };
+  }
+
+  // Local standalone mode
+  if (!scope) return { orgId: "default", userId: null };
+  if (typeof scope === "string") return { orgId: scope, userId: null };
+  return { orgId: scope.orgId || "default", userId: scope.userId ?? null };
 }
 
 type CubeRow = {
@@ -22,6 +43,8 @@ type CubeRow = {
   model: string;
   is_maestro: number;
   seed_key: string | null;
+  org_id: string;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -30,6 +53,8 @@ type ThreadRow = {
   id: string;
   cube_id: string;
   title: string;
+  org_id: string;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -44,6 +69,8 @@ function mapCube(row: CubeRow): Cube {
     model: row.model,
     isMaestro: row.is_maestro === 1,
     seedKey: row.seed_key,
+    orgId: row.org_id,
+    userId: row.user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -54,6 +81,8 @@ function mapThread(row: ThreadRow): Thread {
     id: row.id,
     cubeId: row.cube_id,
     title: row.title,
+    orgId: row.org_id,
+    userId: row.user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -87,27 +116,31 @@ function cleanText(value: string, label: string, max: number): string {
   return trimmed;
 }
 
-export function listCubes(): Cube[] {
+export function listCubes(scope?: ResourceScope | string): Cube[] {
+  const { orgId } = resolveScope(scope);
   const rows = db()
     .prepare(
-      "SELECT * FROM cubes ORDER BY is_maestro DESC, name COLLATE NOCASE ASC",
+      "SELECT * FROM cubes WHERE org_id = ? ORDER BY is_maestro DESC, name COLLATE NOCASE ASC",
     )
-    .all() as CubeRow[];
+    .all(orgId) as CubeRow[];
   return rows.map(mapCube);
 }
 
-export function getCube(id: string): Cube | undefined {
-  const row = db().prepare("SELECT * FROM cubes WHERE id = ?").get(id) as CubeRow | undefined;
+export function getCube(id: string, scope?: ResourceScope | string): Cube | undefined {
+  const { orgId } = resolveScope(scope);
+  const row = db().prepare("SELECT * FROM cubes WHERE id = ? AND org_id = ?").get(id, orgId) as CubeRow | undefined;
   return row ? mapCube(row) : undefined;
 }
 
-export function getCubeBySlug(slug: string): Cube | undefined {
-  const row = db().prepare("SELECT * FROM cubes WHERE slug = ?").get(slug) as CubeRow | undefined;
+export function getCubeBySlug(slug: string, scope?: ResourceScope | string): Cube | undefined {
+  const { orgId } = resolveScope(scope);
+  const row = db().prepare("SELECT * FROM cubes WHERE slug = ? AND org_id = ?").get(slug, orgId) as CubeRow | undefined;
   return row ? mapCube(row) : undefined;
 }
 
-export function getMaestro(): Cube {
-  const row = db().prepare("SELECT * FROM cubes WHERE is_maestro = 1 LIMIT 1").get() as
+export function getMaestro(scope?: ResourceScope | string): Cube {
+  const { orgId } = resolveScope(scope);
+  const row = db().prepare("SELECT * FROM cubes WHERE is_maestro = 1 AND org_id = ? LIMIT 1").get(orgId) as
     | CubeRow
     | undefined;
   if (!row) throw new HttpError("Maestro is missing from the catalog.", 500);
@@ -119,9 +152,15 @@ export type CubeInput = {
   painPoint: string;
   instructions: string;
   model?: string;
+  orgId?: string;
+  userId?: string | null;
+  scope?: ResourceScope | string;
 };
 
 export function createCube(input: CubeInput): Cube {
+  const resolved = resolveScope(input.scope || input.orgId);
+  const orgId = input.scope ? resolved.orgId : input.orgId || resolved.orgId;
+  const userId = input.userId ?? resolved.userId;
   const name = cleanText(input.name, "Name", 60);
   const painPoint = cleanText(input.painPoint, "Pain point", 200);
   const instructions = cleanText(input.instructions, "Instructions", 8000);
@@ -136,6 +175,8 @@ export function createCube(input: CubeInput): Cube {
     model,
     isMaestro: false,
     seedKey: null,
+    orgId,
+    userId,
     createdAt: now,
     updatedAt: now,
   };
@@ -143,9 +184,9 @@ export function createCube(input: CubeInput): Cube {
   db()
     .prepare(
       `INSERT INTO cubes (
-        id, slug, name, pain_point, instructions, model, is_maestro, seed_key, created_at, updated_at
+        id, slug, name, pain_point, instructions, model, is_maestro, seed_key, org_id, user_id, created_at, updated_at
       ) VALUES (
-        @id, @slug, @name, @painPoint, @instructions, @model, 0, NULL, @createdAt, @updatedAt
+        @id, @slug, @name, @painPoint, @instructions, @model, 0, NULL, @orgId, @userId, @createdAt, @updatedAt
       )`,
     )
     .run(cube);
@@ -157,10 +198,13 @@ export type CubePatch = {
   painPoint?: string;
   instructions?: string;
   model?: string;
+  orgId?: string;
+  scope?: ResourceScope | string;
 };
 
-export function updateCube(id: string, patch: CubePatch): Cube {
-  const current = getCube(id);
+export function updateCube(id: string, patch: CubePatch, scope?: ResourceScope | string): Cube {
+  const resolved = resolveScope(patch.scope || scope || patch.orgId);
+  const current = getCube(id, resolved);
   if (!current) throw new HttpError("Cube not found.", 404);
 
   const next: Cube = {
@@ -183,14 +227,15 @@ export function updateCube(id: string, patch: CubePatch): Cube {
       `UPDATE cubes
        SET name = @name, pain_point = @painPoint, instructions = @instructions,
            model = @model, updated_at = @updatedAt
-       WHERE id = @id`,
+       WHERE id = @id AND org_id = @orgId`,
     )
     .run(next);
   return next;
 }
 
-export function resetCube(id: string): Cube {
-  const current = getCube(id);
+export function resetCube(id: string, scope?: ResourceScope | string): Cube {
+  const resolved = resolveScope(scope);
+  const current = getCube(id, resolved);
   if (!current) throw new HttpError("Cube not found.", 404);
   if (!current.seedKey) throw new HttpError("Only seeded Cubes can be reset.", 400);
   const seed = seedByKey(current.seedKey);
@@ -201,64 +246,74 @@ export function resetCube(id: string): Cube {
     painPoint: seed.painPoint,
     instructions: seed.instructions,
     model: defaultModel(),
-  });
+    orgId: resolved.orgId,
+  }, resolved);
 }
 
-export function listThreads(cubeId: string): Thread[] {
-  if (!getCube(cubeId)) throw new HttpError("Cube not found.", 404);
+export function listThreads(cubeId: string, scope?: ResourceScope | string): Thread[] {
+  const resolved = resolveScope(scope);
+  if (!getCube(cubeId, resolved)) throw new HttpError("Cube not found.", 404);
   const rows = db()
-    .prepare("SELECT * FROM threads WHERE cube_id = ? ORDER BY updated_at DESC")
-    .all(cubeId) as ThreadRow[];
+    .prepare("SELECT * FROM threads WHERE cube_id = ? AND org_id = ? ORDER BY updated_at DESC")
+    .all(cubeId, resolved.orgId) as ThreadRow[];
   return rows.map(mapThread);
 }
 
-export function getThread(id: string): Thread | undefined {
-  const row = db().prepare("SELECT * FROM threads WHERE id = ?").get(id) as ThreadRow | undefined;
+export function getThread(id: string, scope?: ResourceScope | string): Thread | undefined {
+  const resolved = resolveScope(scope);
+  const row = db().prepare("SELECT * FROM threads WHERE id = ? AND org_id = ?").get(id, resolved.orgId) as ThreadRow | undefined;
   return row ? mapThread(row) : undefined;
 }
 
-export function createThread(cubeId: string): Thread {
-  if (!getCube(cubeId)) throw new HttpError("Cube not found.", 404);
+export function createThread(cubeId: string, scope?: ResourceScope | string, userId?: string | null): Thread {
+  const resolved = resolveScope(scope);
+  if (!getCube(cubeId, resolved)) throw new HttpError("Cube not found.", 404);
   const now = new Date().toISOString();
   const thread: Thread = {
     id: crypto.randomUUID(),
     cubeId,
     title: "New chat",
+    orgId: resolved.orgId,
+    userId: userId ?? resolved.userId,
     createdAt: now,
     updatedAt: now,
   };
   db()
     .prepare(
-      `INSERT INTO threads (id, cube_id, title, created_at, updated_at)
-       VALUES (@id, @cubeId, @title, @createdAt, @updatedAt)`,
+      `INSERT INTO threads (id, cube_id, title, org_id, user_id, created_at, updated_at)
+       VALUES (@id, @cubeId, @title, @orgId, @userId, @createdAt, @updatedAt)`,
     )
     .run(thread);
   return thread;
 }
 
-export function latestThread(cubeId: string): Thread {
-  return listThreads(cubeId)[0] ?? createThread(cubeId);
+export function latestThread(cubeId: string, scope?: ResourceScope | string): Thread {
+  return listThreads(cubeId, scope)[0] ?? createThread(cubeId, scope);
 }
 
-export function getMessages(threadId: string): UIMessage[] {
+export function getMessages(threadId: string, scope?: ResourceScope | string): UIMessage[] {
+  const resolved = resolveScope(scope);
   const rows = db()
-    .prepare("SELECT body FROM messages WHERE thread_id = ? ORDER BY position ASC")
-    .all(threadId) as { body: string }[];
+    .prepare("SELECT body FROM messages WHERE thread_id = ? AND org_id = ? ORDER BY position ASC")
+    .all(threadId, resolved.orgId) as { body: string }[];
   return rows.map((row) => JSON.parse(row.body) as UIMessage);
 }
 
-export function saveThreadMessages(threadId: string, messages: UIMessage[]) {
-  const thread = getThread(threadId);
-  if (!thread) return;
+export function saveThreadMessages(threadId: string, messages: UIMessage[], scope?: ResourceScope | string) {
+  const resolved = resolveScope(scope);
+  const thread = getThread(threadId, resolved);
+  if (!thread) throw new HttpError("Thread not found or belongs to another organization", 404);
 
   const database = db();
   const now = new Date().toISOString();
   const title = threadTitle(thread.title, messages);
+  const orgId = thread.orgId || resolved.orgId;
+
   const write = database.transaction(() => {
-    database.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
+    database.prepare("DELETE FROM messages WHERE thread_id = ? AND org_id = ?").run(threadId, orgId);
     const insert = database.prepare(
-      `INSERT INTO messages (id, thread_id, position, role, body)
-       VALUES (@id, @threadId, @position, @role, @body)`,
+      `INSERT OR REPLACE INTO messages (id, thread_id, position, role, body, org_id)
+       VALUES (@id, @threadId, @position, @role, @body, @orgId)`,
     );
     messages.forEach((message, position) => {
       insert.run({
@@ -267,11 +322,12 @@ export function saveThreadMessages(threadId: string, messages: UIMessage[]) {
         position,
         role: message.role,
         body: JSON.stringify(message),
+        orgId,
       });
     });
     database
-      .prepare("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
-      .run(title, now, threadId);
+      .prepare("UPDATE threads SET title = ?, updated_at = ? WHERE id = ? AND org_id = ?")
+      .run(title, now, threadId, orgId);
   });
   write();
 }

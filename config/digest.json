@@ -1,0 +1,11 @@
+{
+  "channels": {
+    "desktop": true,
+    "file": true,
+    "webhook": false,
+    "email": false
+  },
+  "webhookUrl": "",
+  "emailRecipient": "",
+  "minLevel": "info"
+}

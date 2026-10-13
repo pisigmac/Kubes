@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { getSandboxDriver } from "./sandbox.ts";
 
 const OUTPUT_CAP = 32_000;
 const EXEC_MS = 30_000;
@@ -12,6 +12,7 @@ export type CommandRecord = {
   exitCode: number | null;
   stdout: string;
   stderr: string;
+  driver?: string;
 };
 
 export type TreeNode = {
@@ -36,8 +37,8 @@ export function computerRoot(): string {
 }
 
 export function seatWaitMs(): number {
-  const raw = Number(process.env.CUBES_SEAT_WAIT_MS ?? 20_000);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 20_000;
+  const raw = Number(process.env.CUBES_SEAT_WAIT_MS ?? 35_000);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 35_000;
 }
 
 export function seatHolder(): string | null {
@@ -50,19 +51,22 @@ function safeSlug(slug: string): string {
   return clean;
 }
 
-export function ownRoot(slug: string, isMaestro: boolean): string {
+export function ownRoot(slug: string, isMaestro: boolean, orgId = "default"): string {
   const root = computerRoot();
-  return isMaestro ? path.join(root, "home") : path.join(root, "cubes", safeSlug(slug));
+  const cleanOrg = orgId && orgId !== "default" ? orgId.replace(/[^a-zA-Z0-9_-]/g, "_") : null;
+  const base = cleanOrg ? path.join(root, "orgs", cleanOrg) : root;
+  return isMaestro ? path.join(base, "home") : path.join(base, "cubes", safeSlug(slug));
 }
 
-export function ensureWorkspace(slug: string, isMaestro: boolean): string {
-  const root = ownRoot(slug, isMaestro);
+export function ensureWorkspace(slug: string, isMaestro: boolean, orgId = "default"): string {
+  const root = ownRoot(slug, isMaestro, orgId);
   fs.mkdirSync(path.join(root, "notes"), { recursive: true });
   const tools = path.join(root, "TOOLS.md");
   if (!fs.existsSync(tools)) {
     fs.writeFileSync(tools, "# Tools\n\nScripts and conventions this Cube keeps for itself.\n");
   }
-  fs.mkdirSync(path.join(computerRoot(), "shots"), { recursive: true });
+  const shotDir = path.dirname(screenshotPath(orgId));
+  fs.mkdirSync(shotDir, { recursive: true });
   return root;
 }
 
@@ -94,12 +98,12 @@ export function resolveInside(root: string, userPath: string): string {
   return realInside(root, lexical);
 }
 
-export function readRootFor(actor: { slug: string; isMaestro: boolean }, targetSlug: string): string {
+export function readRootFor(actor: { slug: string; isMaestro: boolean }, targetSlug: string, orgId = "default"): string {
   if (!actor.isMaestro && targetSlug !== actor.slug) {
     throw new Error("That directory belongs to another Cube.");
   }
   const targetMaestro = actor.isMaestro && (targetSlug === "maestro" || targetSlug === actor.slug);
-  return ensureWorkspace(targetMaestro ? actor.slug : targetSlug, targetMaestro);
+  return ensureWorkspace(targetMaestro ? actor.slug : targetSlug, targetMaestro, orgId);
 }
 
 function assertCommand(command: string, root: string): void {
@@ -123,38 +127,132 @@ function assertCommand(command: string, root: string): void {
 }
 
 export function recentCommands(limit = 20): CommandRecord[] {
+  const globalDb = (globalThis as unknown as {
+    cubesDb?: {
+      prepare: (sql: string) => {
+        all: (arg: unknown) => unknown[];
+      };
+    };
+  }).cubesDb;
+
+  if (globalDb) {
+    try {
+      const rows = globalDb
+        .prepare("SELECT * FROM command_logs ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as {
+          slug: string;
+          command: string;
+          exit_code: number | null;
+          stdout: string;
+          stderr: string;
+          driver: string;
+          created_at: string;
+        }[];
+      if (rows && rows.length > 0) {
+        return rows.map((r) => ({
+          at: r.created_at,
+          slug: r.slug,
+          command: r.command,
+          exitCode: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          driver: r.driver,
+        }));
+      }
+    } catch {
+      // fallback to in-memory cache if query fails
+    }
+  }
   return commands.slice(-limit).reverse();
 }
 
 export function rememberCommand(record: CommandRecord): void {
   commands.push(record);
   if (commands.length > 100) commands.splice(0, commands.length - 100);
+
+  const globalDb = (globalThis as unknown as {
+    cubesDb?: {
+      prepare: (sql: string) => {
+        run: (...args: unknown[]) => void;
+      };
+    };
+  }).cubesDb;
+
+  if (globalDb) {
+    try {
+      globalDb
+        .prepare(
+          `INSERT INTO command_logs (id, slug, command, exit_code, stdout, stderr, driver, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          record.slug,
+          record.command,
+          record.exitCode,
+          record.stdout,
+          record.stderr,
+          record.driver || "direct",
+          record.at,
+        );
+    } catch {
+      // Ignore DB write errors
+    }
+  }
 }
 
-export async function withSeat<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  const release = await acquire(name);
+export async function withSeat<T>(name: string, fn: () => Promise<T>, abortSignal?: AbortSignal): Promise<T> {
+  const release = await acquire(name, abortSignal);
   try {
+    if (abortSignal?.aborted) {
+      throw new Error("Operation aborted.");
+    }
     return await fn();
   } finally {
     release();
   }
 }
 
-function acquire(name: string): Promise<() => void> {
+function acquire(name: string, abortSignal?: AbortSignal): Promise<() => void> {
+  if (abortSignal?.aborted) {
+    return Promise.reject(new Error("Operation aborted."));
+  }
   if (!holder) {
     holder = { name };
     return Promise.resolve(releaseSeat);
   }
   return new Promise((resolve, reject) => {
+    const waiterRef: { timer: NodeJS.Timeout | null } = { timer: null };
+    const cleanup = () => {
+      if (waiterRef.timer) clearTimeout(waiterRef.timer);
+      const index = waiters.findIndex((waiter) => waiter.timer === waiterRef.timer);
+      if (index >= 0) waiters.splice(index, 1);
+    };
+
+    const abortHandler = () => {
+      cleanup();
+      reject(new Error("Operation aborted while waiting for computer seat."));
+    };
+
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", abortHandler, { once: true });
+    }
+
     const timer = setTimeout(() => {
+      if (abortSignal) abortSignal.removeEventListener("abort", abortHandler);
       const index = waiters.findIndex((waiter) => waiter.timer === timer);
       if (index >= 0) waiters.splice(index, 1);
       reject(new Error(`Computer is in use by ${holder?.name ?? "another Cube"}.`));
     }, seatWaitMs());
+    waiterRef.timer = timer;
+
     waiters.push({
       name,
       timer,
-      grant: () => resolve(releaseSeat),
+      grant: () => {
+        if (abortSignal) abortSignal.removeEventListener("abort", abortHandler);
+        resolve(releaseSeat);
+      },
     });
   });
 }
@@ -170,59 +268,49 @@ function releaseSeat(): void {
   next.grant();
 }
 
+export function forceReleaseSeat(): void {
+  holder = null;
+  const next = waiters.shift();
+  if (next) {
+    clearTimeout(next.timer);
+    holder = { name: next.name };
+    next.grant();
+  }
+}
+
 export async function execCommand(
   slug: string,
   isMaestro: boolean,
   name: string,
   command: string,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  const root = ensureWorkspace(slug, isMaestro);
+  orgId = "default",
+  abortSignal?: AbortSignal,
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
+  const root = ensureWorkspace(slug, isMaestro, orgId);
   assertCommand(command, root);
-  return withSeat(name, () => runBash(root, slug, command));
+  return withSeat(name, () => runBash(root, slug, command, abortSignal), abortSignal);
 }
 
-function runBash(
+async function runBash(
   root: string,
   slug: string,
   command: string,
-): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const child = spawn("bash", ["-c", command], {
-      cwd: root,
-      env: {
-        PATH: process.env.PATH || "/usr/bin:/bin",
-        HOME: root,
-        LANG: "C.UTF-8",
-        TERM: "dumb",
-      } as unknown as NodeJS.ProcessEnv,
-      signal: AbortSignal.timeout(EXEC_MS),
-    });
-    const take = (chunk: Buffer, current: string) => {
-      const next = (current + chunk.toString("utf8")).slice(-OUTPUT_CAP);
-      return next;
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout = take(chunk, stdout);
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = take(chunk, stderr);
-    });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      const result = { exitCode: code, stdout, stderr };
-      rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
-      resolve(result);
-    });
+  abortSignal?: AbortSignal,
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
+  const driver = getSandboxDriver();
+  const { getCubePolicy } = await import("../cubes/policy.ts");
+  const policy = getCubePolicy(slug);
+
+  const result = await driver.execute({
+    root,
+    slug,
+    command,
+    timeoutMs: EXEC_MS,
+    networkEgress: policy.network_egress,
+    abortSignal,
   });
+  rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
+  return result;
 }
 
 export function listTree(root: string, depth = 3): TreeNode[] {
@@ -288,14 +376,23 @@ export function readDownload(root: string, userPath: string): { file: string; na
   return { file, name: path.basename(file), bytes: fs.readFileSync(file) };
 }
 
-export function chromeDir(): string {
+export function chromeDir(orgId = "default"): string {
+  if (orgId && orgId !== "default") {
+    const cleanOrg = orgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return path.join(computerRoot(), "orgs", cleanOrg, "chrome");
+  }
   return path.join(computerRoot(), "chrome");
 }
 
-export function screenshotPath(): string {
+export function screenshotPath(orgId = "default"): string {
+  if (orgId && orgId !== "default") {
+    const cleanOrg = orgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return path.join(computerRoot(), "orgs", cleanOrg, "shots", "latest.png");
+  }
   return path.join(computerRoot(), "shots", "latest.png");
 }
 
-export function screenshotExists(): boolean {
-  return fs.existsSync(screenshotPath());
+export function screenshotExists(orgId = "default"): boolean {
+  return fs.existsSync(screenshotPath(orgId));
 }
+

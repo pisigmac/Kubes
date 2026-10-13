@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   ensureWorkspace,
   execCommand,
+  forceReleaseSeat,
   readRootFor,
   readText,
   resolveInside,
@@ -13,6 +14,7 @@ import {
   withSeat,
   writeText,
 } from "./jail.ts";
+import { getSandboxDriver } from "./sandbox.ts";
 
 process.env.CUBES_COMPUTER_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "cubes-computer-"));
 process.env.CUBES_SEAT_WAIT_MS = "200";
@@ -47,6 +49,13 @@ test("symlink that leaves the directory is refused", () => {
 });
 
 test("exec stays in the Cube directory and the seat is exclusive", async () => {
+  if (getSandboxDriver().name === "unavailable") {
+    await assert.rejects(
+      execCommand("focus", false, "Focus", "pwd"),
+      /Computer execution is disabled because no usable sandbox is available/,
+    );
+    return;
+  }
   const result = await execCommand("focus", false, "Focus", "pwd");
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /focus/);
@@ -68,3 +77,101 @@ test("exec stays in the Cube directory and the seat is exclusive", async () => {
   await withSeat("Write", async () => "ok");
   assert.equal(seatHolder(), null);
 });
+
+test("computerTools honors safeMode and approved lists", async () => {
+  const { computerTools } = await import("./tools.ts");
+
+  // Actor with safeMode: true and no approved commands or writes
+  const strictTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: true,
+    approvedCommands: [],
+    approvedWrites: [],
+  });
+
+  // Executing a non-whitelisted command without prior approval must require approval
+  const execTool = strictTools.computer_exec as { execute: (input: { command: string }) => Promise<Record<string, unknown>> };
+  const execBlocked = await execTool.execute({ command: "pnpm test" });
+  assert.equal(execBlocked.ok, false);
+  assert.equal(execBlocked.requiresApproval, true);
+  assert.equal(execBlocked.command, "pnpm test");
+
+  // Executing a whitelisted safe command ('pwd') auto-executes even in safeMode!
+  const execSafe = await execTool.execute({ command: "pwd" });
+  assert.equal(execSafe.requiresApproval, undefined);
+
+  // Writing a file without prior approval must require approval
+  const writeTool = strictTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const writeBlocked = await writeTool.execute({ path: "notes/draft.md", text: "hello" });
+  assert.equal(writeBlocked.ok, false);
+  assert.equal(writeBlocked.requiresApproval, true);
+  assert.equal(writeBlocked.path, "notes/draft.md");
+
+  // Actor with command and write approved
+  const approvedTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: true,
+    approvedCommands: ["echo approved"],
+    approvedWrites: ["notes/draft.md"],
+  });
+
+  // Write should now proceed
+  const approvedWriteTool = approvedTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const writeAllowed = await approvedWriteTool.execute({ path: "notes/draft.md", text: "hello" });
+  assert.equal(writeAllowed.ok, true);
+
+  // In safeMode: false, unapproved write proceeds directly
+  const autoTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: false,
+  });
+  const autoWriteTool = autoTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const autoWriteAllowed = await autoWriteTool.execute({ path: "notes/auto.md", text: "auto" });
+  assert.equal(autoWriteAllowed.ok, true);
+});
+
+test("withSeat handles abort signals cleanly without leaking seats or waiters", async () => {
+  // Pre-aborted signal should reject immediately and not hold seat
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(withSeat("PreAborted", async () => "ok", preAborted.signal), /aborted/i);
+  assert.equal(seatHolder(), null);
+
+  // Seat is acquired by Cube A
+  let releaseA: (() => void) | undefined;
+  const aAcquired = new Promise<void>((resolve) => {
+    void withSeat("HolderA", async () => {
+      resolve();
+      await new Promise<void>((done) => {
+        releaseA = done;
+      });
+    });
+  });
+  await aAcquired;
+  assert.equal(seatHolder(), "HolderA");
+
+  // Cube B queues with an AbortSignal and aborts while waiting
+  const abortB = new AbortController();
+  const bPromise = withSeat("WaiterB", async () => "ok", abortB.signal);
+  abortB.abort();
+  await assert.rejects(bPromise, /aborted/i);
+
+  // When A releases, seat should become free because B was removed
+  releaseA?.();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(seatHolder(), null);
+
+  // forceReleaseSeat resets any lingering seat holder
+  await withSeat("Temporary", async () => {
+    assert.equal(seatHolder(), "Temporary");
+    forceReleaseSeat();
+    assert.equal(seatHolder(), null);
+  });
+});
+

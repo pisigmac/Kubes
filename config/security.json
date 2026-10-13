@@ -1,0 +1,16 @@
+{
+  "forbiddenEnvPatterns": [
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "AUTH",
+    "PASSWORD",
+    "DESKID",
+    "GROQ",
+    "OPENAI",
+    "ANTHROPIC",
+    "GEMINI",
+    "OLLAMA",
+    "CREDENTIAL"
+  ]
+}

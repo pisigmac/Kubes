@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { browse, clickPage, typePage } from "@/lib/computer/browser";
+import { browse, clickPage, typePage } from "./browser.ts";
 import {
   ensureWorkspace,
   execCommand,
@@ -9,9 +9,39 @@ import {
   readText,
   resolveInside,
   writeText,
-} from "@/lib/computer/jail";
+} from "./jail.ts";
+import { isSafeCommand } from "./safety.ts";
+import { assertToolAllowed } from "../cubes/policy.ts";
 
-type Actor = { slug: string; name: string; isMaestro: boolean };
+export type ToolImpactLevel = "safe_read" | "consequential_write" | "consequential_exec" | "consequential_external";
+
+export const TOOL_IMPACT: Record<string, ToolImpactLevel> = {
+  computer_list: "safe_read",
+  computer_read: "safe_read",
+  live_search: "safe_read",
+  computer_write: "consequential_write",
+  computer_exec: "consequential_exec",
+  computer_browse: "consequential_external",
+  computer_click: "consequential_external",
+  computer_type: "consequential_external",
+  schedule_task: "consequential_write",
+  update_task: "consequential_write",
+  delete_task: "consequential_write",
+  record_transaction: "consequential_write",
+  track_application: "consequential_write",
+};
+
+export type Actor = {
+  slug: string;
+  name: string;
+  isMaestro: boolean;
+  orgId?: string;
+  userId?: string | null;
+  safeMode?: boolean;
+  approvedCommands?: string[];
+  approvedWrites?: string[];
+  abortSignal?: AbortSignal;
+};
 
 function failed(error: unknown): { ok: false; summary: string } {
   const summary = error instanceof Error ? error.message : "The computer could not do that.";
@@ -19,14 +49,34 @@ function failed(error: unknown): { ok: false; summary: string } {
 }
 
 export function computerTools(actor: Actor) {
-  const own = () => ensureWorkspace(actor.slug, actor.isMaestro);
+  const orgId = actor.orgId || "default";
+  const own = () => ensureWorkspace(actor.slug, actor.isMaestro, orgId);
   return {
     computer_exec: tool({
       description: "Run one shell command in this Cube's directory on the shared computer.",
       inputSchema: z.object({ command: z.string() }),
       execute: async ({ command }) => {
         try {
-          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command);
+          assertToolAllowed(actor.slug, "computer_exec");
+        } catch (error) {
+          return failed(error);
+        }
+        const trimmed = command.trim();
+        const autoSafe = isSafeCommand(trimmed, actor.approvedCommands);
+        if (actor.safeMode && !autoSafe && !actor.approvedCommands?.includes(trimmed)) {
+          return {
+            ok: false,
+            requiresApproval: true,
+            action: "computer_exec",
+            command: trimmed,
+            summary: `Action requires approval: \`${command.slice(0, 80)}\``,
+            stdout: "",
+            stderr: "Action requires user approval before execution.",
+            exitCode: 1,
+          };
+        }
+        try {
+          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command, orgId, actor.abortSignal);
           const summary = `Ran \`${command.slice(0, 80)}\` (${result.exitCode ?? "stopped"})`;
           return { ok: result.exitCode === 0, summary, ...result };
         } catch (error) {
@@ -44,7 +94,7 @@ export function computerTools(actor: Actor) {
       }),
       execute: async ({ cube, path }) => {
         try {
-          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug);
+          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug, orgId);
           const start = path ? resolveInside(root, path) : root;
           const entries = listTree(start);
           return { ok: true, summary: `Listed ${path || cube || actor.slug}`, entries };
@@ -63,7 +113,7 @@ export function computerTools(actor: Actor) {
       }),
       execute: async ({ path, cube }) => {
         try {
-          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug);
+          const root = readRootFor(actor, (cube || actor.slug).trim() || actor.slug, orgId);
           const file = readText(root, path);
           return {
             ok: true,
@@ -80,6 +130,16 @@ export function computerTools(actor: Actor) {
       description: "Write a text file in this Cube's own directory. Creates folders. Cannot write another Cube's files.",
       inputSchema: z.object({ path: z.string(), text: z.string() }),
       execute: async ({ path, text }) => {
+        if (actor.safeMode && !actor.approvedWrites?.includes(path.trim())) {
+          return {
+            ok: false,
+            requiresApproval: true,
+            action: "computer_write",
+            path: path.trim(),
+            text,
+            summary: `Action requires approval to write: \`${path}\``,
+          };
+        }
         try {
           const saved = writeText(own(), path, text);
           return { ok: true, summary: `Wrote ${saved}`, path: saved };
@@ -93,7 +153,8 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ url: z.string() }),
       execute: async ({ url }) => {
         try {
-          const page = await browse(actor.name, url);
+          assertToolAllowed(actor.slug, "computer_browse");
+          const page = await browse(actor.name, url, orgId, actor.abortSignal);
           return { ok: true, summary: `Opened ${page.url}`, ...page };
         } catch (error) {
           return failed(error);
@@ -105,7 +166,7 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ target: z.string() }),
       execute: async ({ target }) => {
         try {
-          const url = await clickPage(actor.name, target);
+          const url = await clickPage(actor.name, target, orgId);
           return { ok: true, summary: `Clicked ${target}`, url };
         } catch (error) {
           return failed(error);
@@ -117,8 +178,190 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ text: z.string(), target: z.string().optional() }),
       execute: async ({ text, target }) => {
         try {
-          await typePage(actor.name, text, target);
+          await typePage(actor.name, text, target, orgId);
           return { ok: true, summary: "Typed into the page" };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    live_search: tool({
+      description:
+        "Perform real-time web search for current events, breaking news, live documentation, market data, and job listings with verified citations.",
+      inputSchema: z.object({
+        query: z.string().describe("Search keywords or natural language query"),
+        maxResults: z.number().int().min(1).max(10).optional().default(5),
+      }),
+      execute: async ({ query, maxResults }) => {
+        try {
+          const { executeLiveSearch } = await import("../ai/search.ts");
+          const searchResult = await executeLiveSearch(query, maxResults);
+          return {
+            ok: true,
+            summary: `Searched web for "${query}" (${searchResult.results.length} sources)`,
+            ...searchResult,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    memory_remember: tool({
+      description:
+        "Store a key user preference, fact, project detail, or context into long-term memory across sessions.",
+      inputSchema: z.object({
+        content: z.string().describe("The information/fact to remember"),
+        category: z.enum(["preference", "project", "fact", "instruction", "general"]).optional().default("general"),
+        keywords: z.array(z.string()).optional(),
+      }),
+      execute: async ({ content, category, keywords }) => {
+        try {
+          const { saveMemory } = await import("../memory/store.ts");
+          const saved = saveMemory({
+            cubeSlug: actor.slug,
+            category,
+            content,
+            keywords,
+          });
+          return {
+            ok: true,
+            summary: `Remembered: "${content.slice(0, 60)}..."`,
+            memoryId: saved.id,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    memory_recall: tool({
+      description: "Search and recall relevant past memories, facts, and user preferences by topic.",
+      inputSchema: z.object({
+        query: z.string().describe("Topic or question to recall context for"),
+        limit: z.number().int().min(1).max(10).optional().default(5),
+      }),
+      execute: async ({ query, limit }) => {
+        try {
+          const { queryMemoriesHybrid } = await import("../memory/store.ts");
+          const memories = await queryMemoriesHybrid(actor.slug, query, limit);
+          return {
+            ok: true,
+            summary: `Recalled ${memories.length} memories for "${query}"`,
+            memories: memories.map((m) => ({ category: m.category, content: m.content, createdAt: m.createdAt })),
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    job_application_track: tool({
+      description:
+        "Manage job applications in notes/applications.md. Record new job opportunities, update status, and set next steps.",
+      inputSchema: z.object({
+        role: z.string().describe("Job title or position"),
+        company: z.string().describe("Company or organization name"),
+        link: z.string().optional().default(""),
+        status: z.enum(["Wishlist", "Applied", "Interviewing", "Offer", "Rejected"]).optional().default("Applied"),
+        nextStep: z.string().optional().default("Follow up"),
+        notes: z.string().optional().default(""),
+        confirmDuplicate: z.boolean().optional().default(false).describe("Pass true to commit or update duplicate application entries"),
+      }),
+      execute: async ({ role, company, link, status, nextStep, notes, confirmDuplicate }) => {
+        try {
+          const { recordApplication } = await import("../specialist/job_hunt.ts");
+          const result = recordApplication(
+            {
+              role,
+              company,
+              link: link || "",
+              status: status || "Applied",
+              nextStep: nextStep || "",
+              date: new Date().toISOString().slice(0, 10),
+              notes: notes || "",
+            },
+            actor.slug,
+            { confirmDuplicate },
+          );
+          return {
+            ok: true,
+            summary: result.isDuplicate && !result.updated
+              ? `Duplicate detected for ${role} at ${company}. Pass confirmDuplicate=true to commit.`
+              : `Recorded application: ${role} at ${company} [${status}]`,
+            totalApplications: result.applications.length,
+            isDuplicate: result.isDuplicate,
+            preview: result.preview,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    money_ledger_record: tool({
+      description:
+        "Log a financial expense, income, or recurring subscription into notes/ledger.csv and compute current budget metrics.",
+      inputSchema: z.object({
+        payee: z.string().describe("Merchant, employer, or payee name"),
+        amount: z.number().positive().describe("Amount in dollars/currency"),
+        category: z.string().describe("Expense category e.g. Rent, Groceries, Cloud, Salary"),
+        type: z.enum(["expense", "income", "subscription"]).optional().default("expense"),
+        notes: z.string().optional().default(""),
+        confirmDuplicate: z.boolean().optional().default(false).describe("Pass true to confirm and commit a duplicate transaction"),
+      }),
+      execute: async ({ payee, amount, category, type, notes, confirmDuplicate }) => {
+        try {
+          const { recordTransaction } = await import("../specialist/money_ledger.ts");
+          const result = recordTransaction(
+            {
+              date: new Date().toISOString().slice(0, 10),
+              payee,
+              category,
+              amount,
+              type: type || "expense",
+              notes: notes || "",
+            },
+            actor.slug,
+            { confirmDuplicate },
+          );
+          return {
+            ok: true,
+            summary: result.isDuplicate && result.warning
+              ? result.warning
+              : `Recorded ${type}: $${amount} for ${payee} (${category})`,
+            budgetSummary: result.budgetSummary,
+            isDuplicate: result.isDuplicate,
+            preview: result.preview,
+          };
+        } catch (error) {
+          return failed(error);
+        }
+      },
+    }),
+    concept_diagram_create: tool({
+      description:
+        "Generate and save a visual Mermaid mind-map, flowchart, or architecture diagram artifact into notes/diagram.mmd.",
+      inputSchema: z.object({
+        title: z.string().describe("Diagram title"),
+        mermaidCode: z.string().describe("Valid Mermaid syntax (e.g. flowchart TD / mindmap / sequenceDiagram)"),
+        explanation: z.string().optional().describe("Brief conceptual explanation of the diagram"),
+        fileName: z.string().optional().default("diagram.mmd"),
+      }),
+      execute: async ({ title, mermaidCode, explanation, fileName }) => {
+        try {
+          const { saveDiagramArtifact } = await import("../specialist/diagrams.ts");
+          const result = saveDiagramArtifact(
+            {
+              title,
+              type: "flowchart",
+              mermaidCode,
+              explanation,
+            },
+            actor.slug,
+            fileName,
+          );
+          return {
+            ok: true,
+            summary: `Created diagram: "${title}" at ${result.path}`,
+            path: result.path,
+          };
         } catch (error) {
           return failed(error);
         }
@@ -126,3 +369,5 @@ export function computerTools(actor: Actor) {
     }),
   } satisfies ToolSet;
 }
+
+

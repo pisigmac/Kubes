@@ -1,10 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { LEGACY_MAESTRO_INSTRUCTIONS, LEGACY_WORK, SEED_CUBES } from "@/lib/cubes/catalog";
-import { defaultModel } from "@/lib/ai/provider";
+import { LEGACY_MAESTRO_INSTRUCTIONS, LEGACY_WORK, SEED_CUBES } from "./cubes/catalog.ts";
+import { defaultModel } from "./ai/provider.ts";
 
 const globalForDb = globalThis as unknown as { cubesDb?: Database.Database };
+
+function addColumnIfNotExists(db: Database.Database, table: string, column: string, typeDef: string) {
+  try {
+    const info = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!info.some((col) => col.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeDef}`);
+    }
+  } catch {
+    // Ignore migration column already existing errors
+  }
+}
 
 function migrate(database: Database.Database) {
   database.exec(`
@@ -17,6 +28,8 @@ function migrate(database: Database.Database) {
       model TEXT NOT NULL,
       is_maestro INTEGER NOT NULL DEFAULT 0,
       seed_key TEXT UNIQUE,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -25,6 +38,8 @@ function migrate(database: Database.Database) {
       id TEXT PRIMARY KEY,
       cube_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (cube_id) REFERENCES cubes(id)
@@ -36,10 +51,10 @@ function migrate(database: Database.Database) {
       position INTEGER NOT NULL,
       role TEXT NOT NULL,
       body TEXT NOT NULL,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
       FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
     );
-
-    CREATE INDEX IF NOT EXISTS threads_cube_updated ON threads (cube_id, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS schedules (
       id TEXT PRIMARY KEY,
@@ -52,12 +67,78 @@ function migrate(database: Database.Database) {
       last_status TEXT,
       last_error TEXT,
       thread_id TEXT,
+      timezone TEXT NOT NULL DEFAULT 'UTC',
+      catchup_policy TEXT NOT NULL DEFAULT 'skip_missed',
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (cube_id) REFERENCES cubes(id),
       FOREIGN KEY (thread_id) REFERENCES threads(id)
     );
+
+    CREATE TABLE IF NOT EXISTS command_logs (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL,
+      command TEXT NOT NULL,
+      exit_code INTEGER,
+      stdout TEXT NOT NULL,
+      stderr TEXT NOT NULL,
+      driver TEXT NOT NULL,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      cube_slug TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      keywords TEXT NOT NULL,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS digests (
+      id TEXT PRIMARY KEY,
+      cube_id TEXT NOT NULL,
+      cube_slug TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT NOT NULL,
+      channels TEXT NOT NULL,
+      details TEXT,
+      org_id TEXT NOT NULL DEFAULT 'default',
+      user_id TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Migrate existing tables if they were created without org_id / user_id / timezone / catchup_policy
+  const tables = ["cubes", "threads", "messages", "schedules", "command_logs", "memories", "digests"];
+  for (const table of tables) {
+    addColumnIfNotExists(database, table, "org_id", "TEXT NOT NULL DEFAULT 'default'");
+    addColumnIfNotExists(database, table, "user_id", "TEXT");
+  }
+  addColumnIfNotExists(database, "schedules", "timezone", "TEXT NOT NULL DEFAULT 'UTC'");
+  addColumnIfNotExists(database, "schedules", "catchup_policy", "TEXT NOT NULL DEFAULT 'skip_missed'");
+
+  // Create indexes now that all columns are guaranteed to exist
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS threads_cube_updated ON threads (cube_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS threads_org_updated ON threads (org_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS messages_thread_position ON messages (thread_id, position);
+    CREATE INDEX IF NOT EXISTS schedules_org ON schedules (org_id, next_run_at ASC);
+    CREATE INDEX IF NOT EXISTS command_logs_slug_created ON command_logs (slug, created_at DESC);
+    CREATE INDEX IF NOT EXISTS command_logs_org_created ON command_logs (org_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS memories_slug_category ON memories (cube_slug, category);
+    CREATE INDEX IF NOT EXISTS memories_org_category ON memories (org_id, category);
+    CREATE INDEX IF NOT EXISTS digests_created ON digests (created_at DESC);
+    CREATE INDEX IF NOT EXISTS digests_org_created ON digests (org_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS digests_cube ON digests (cube_id, created_at DESC);
   `);
 }
 
@@ -66,13 +147,13 @@ function seed(database: Database.Database) {
   const model = defaultModel();
   const insert = database.prepare(`
     INSERT INTO cubes (
-      id, slug, name, pain_point, instructions, model, is_maestro, seed_key, created_at, updated_at
+      id, slug, name, pain_point, instructions, model, is_maestro, seed_key, org_id, user_id, created_at, updated_at
     ) VALUES (
-      @id, @slug, @name, @painPoint, @instructions, @model, @isMaestro, @seedKey, @createdAt, @updatedAt
+      @id, @slug, @name, @painPoint, @instructions, @model, @isMaestro, @seedKey, 'default', NULL, @createdAt, @updatedAt
     )
   `);
   const existing = new Set(
-    (database.prepare("SELECT slug FROM cubes").all() as { slug: string }[]).map((row) => row.slug),
+    (database.prepare("SELECT slug FROM cubes WHERE org_id = 'default'").all() as { slug: string }[]).map((row) => row.slug),
   );
 
   const write = database.transaction(() => {
@@ -125,19 +206,49 @@ function seed(database: Database.Database) {
   write();
 }
 
+export function checkpointWal(database?: Database.Database): { busy: number; log: number; checkpointed: number } {
+  const target = database || globalForDb.cubesDb;
+  if (!target) return { busy: 0, log: 0, checkpointed: 0 };
+  try {
+    const result = target.pragma("wal_checkpoint(TRUNCATE)") as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>;
+    return result?.[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+  } catch (error) {
+    console.warn("Failed to checkpoint SQLite WAL:", error);
+    return { busy: 1, log: 0, checkpointed: 0 };
+  }
+}
+
+const CHECKPOINT_INTERVAL_MS = 15 * 60 * 1000;
+let checkpointTimer: NodeJS.Timeout | null = null;
+
 export function db(): Database.Database {
   if (!globalForDb.cubesDb) {
     const dir = path.join(process.cwd(), "data");
     fs.mkdirSync(dir, { recursive: true });
     const database = new Database(path.join(dir, "cubes.db"));
     database.pragma("journal_mode = WAL");
+    database.pragma("wal_autocheckpoint = 1000");
     database.pragma("foreign_keys = ON");
     database.pragma("busy_timeout = 5000");
     migrate(database);
     seed(database);
     globalForDb.cubesDb = database;
+
+    if (!checkpointTimer) {
+      checkpointTimer = setInterval(() => {
+        if (globalForDb.cubesDb) {
+          checkpointWal(globalForDb.cubesDb);
+        }
+      }, CHECKPOINT_INTERVAL_MS);
+      checkpointTimer.unref();
+    }
+
     queueMicrotask(() => {
-      void import("@/lib/computer/schedule").then((mod) => mod.startScheduler());
+      void import("./computer/schedule.ts").then((mod) => mod.startScheduler());
     });
   }
   return globalForDb.cubesDb;

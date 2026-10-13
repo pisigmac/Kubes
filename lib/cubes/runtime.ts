@@ -1,16 +1,24 @@
 import { isStepCount, ToolLoopAgent, tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { languageModel } from "@/lib/ai/provider";
-import { computerTools } from "@/lib/computer/tools";
-import { coerceModel } from "@/lib/ai/models";
-import type { Cube, CubeMutationResult, HandoffResult } from "@/lib/cubes/types";
+import { languageModel } from "../ai/provider.ts";
+import { computerTools } from "../computer/tools.ts";
+import { coerceModel } from "../ai/models.ts";
+import type { Cube, CubeMutationResult, HandoffResult } from "./types.ts";
 import {
   createCube,
   getCubeBySlug,
   HttpError,
   listCubes,
   updateCube,
-} from "@/lib/cubes/store";
+} from "./store.ts";
+import {
+  createSchedule,
+  deleteSchedule,
+  listSchedules,
+  updateSchedule,
+} from "../computer/schedule.ts";
+import type { ResourceScope } from "../auth/deskid.ts";
+
 
 function rosterText(cubes: Cube[]): string {
   return cubes
@@ -41,16 +49,22 @@ function failure(error: unknown): string {
 
 function computerBlock(cube: Cube, handoff: boolean): string {
   return `Computer: one shared machine, not the user's computer. Your files stay in your directory. Use computer_list, computer_read, computer_write, and computer_exec for scripts, markdown, and notes. Use computer_browse, computer_click, and computer_type for pages, and only repeat what the page shows. The browser and terminal are one seat.
+Tasks & Scheduling: When the user describes an ongoing routine, recurring check, or automated workflow, suggest a recurring schedule (e.g., daily at 9am "0 9 * * *", weekly on Mondays "0 9 * * 1"). Ask the user if they want to run it on that schedule, and call schedule_task once confirmed. You can also inspect or tune tasks via list_tasks, update_task, and delete_task.
 ${cube.isMaestro ? "You may read every Cube's files by slug. You cannot write their files. Hand the owner the change.\n" : ""}${handoff ? "handoff sends one other Cube a self-contained goal. Their reply is already on screen. Do not paste it. They will not hand the task onward.\n" : ""}Job hunt owns listings, applications, and follow-ups. Work owns the job the user already has.`;
 }
 
-function manageTools() {
+function cubeScope(cube: Cube): ResourceScope {
+  return { orgId: cube.orgId || "default", userId: cube.userId };
+}
+
+function manageTools(currentCube: Cube) {
+  const scope = cubeScope(currentCube);
   return {
     list_cubes: tool({
       description: "List every Cube: slug, name, pain point, instructions, and model.",
       inputSchema: z.object({}),
       execute: async () => ({
-        cubes: listCubes().map(publicCube),
+        cubes: listCubes(scope).map(publicCube),
       }),
     }),
     create_cube: tool({
@@ -68,6 +82,9 @@ function manageTools() {
             painPoint,
             instructions,
             model: await coerceModel(model),
+            orgId: scope.orgId,
+            userId: currentCube.userId,
+            scope,
           });
           return { ok: true, cube };
         } catch (error) {
@@ -85,7 +102,7 @@ function manageTools() {
         model: z.string().optional(),
       }),
       execute: async ({ slug, name, painPoint, instructions, model }): Promise<CubeMutationResult> => {
-        const cube = getCubeBySlug(slug.trim());
+        const cube = getCubeBySlug(slug.trim(), scope);
         if (!cube) return { ok: false, error: `No Cube with slug "${slug}".` };
         if (name === undefined && painPoint === undefined && instructions === undefined && model === undefined) {
           return { ok: false, error: "Nothing to change." };
@@ -96,7 +113,8 @@ function manageTools() {
             painPoint,
             instructions,
             model: model === undefined ? undefined : await coerceModel(model),
-          });
+            scope,
+          }, scope);
           return { ok: true, cube: updated };
         } catch (error) {
           return { ok: false, error: failure(error) };
@@ -107,6 +125,7 @@ function manageTools() {
 }
 
 function handoffTool(caller: Cube) {
+  const scope = cubeScope(caller);
   return tool({
     description:
       "Hand the user's goal to exactly one other Cube by slug. The Cube's reply is shown in the transcript. Do not hand it to yourself.",
@@ -117,7 +136,7 @@ function handoffTool(caller: Cube) {
         .describe("Self-contained goal, including constraints and details from the conversation"),
     }),
     execute: async function* ({ slug, goal }, { abortSignal }) {
-      const cube = getCubeBySlug(slug.trim());
+      const cube = getCubeBySlug(slug.trim(), scope);
       if (!cube || cube.slug === caller.slug) {
         const missing: HandoffResult = {
           ok: false,
@@ -173,6 +192,114 @@ function handoffTool(caller: Cube) {
   });
 }
 
+function scheduleTools(cube: Cube) {
+  const scope = cubeScope(cube);
+  return {
+    list_tasks: tool({
+      description: "List scheduled tasks and automated runs for this Cube.",
+      inputSchema: z.object({
+        cubeSlug: z.string().optional().describe("Optional Cube slug if Maestro wants to check another Cube's tasks"),
+      }),
+      execute: async ({ cubeSlug }) => {
+        try {
+          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim(), scope) : cube;
+          if (!target) return { ok: false, error: `Cube not found.` };
+          const schedules = listSchedules(target.id, scope);
+          return {
+            ok: true,
+            summary: `Found ${schedules.length} scheduled task(s) for ${target.name}.`,
+            tasks: schedules.map((s) => ({
+              id: s.id,
+              cron: s.cron,
+              instruction: s.instruction,
+              enabled: s.enabled,
+              nextRunAt: s.nextRunAt,
+              lastRunAt: s.lastRunAt,
+              lastStatus: s.lastStatus,
+            })),
+          };
+        } catch (error) {
+          return { ok: false, error: failure(error) };
+        }
+      },
+    }),
+    schedule_task: tool({
+      description: "Create a recurring scheduled automated task for a Cube.",
+      inputSchema: z.object({
+        cron: z.string().describe("Standard 5-field cron expression, e.g. '0 9 * * *' (daily at 9am) or '0 9 * * 1' (Mondays at 9am)"),
+        instruction: z.string().describe("Clear, self-contained instruction for what the Cube should do each time this schedule triggers"),
+        cubeSlug: z.string().optional().describe("Optional target Cube slug (defaults to current Cube)"),
+      }),
+      execute: async ({ cron, instruction, cubeSlug }) => {
+        try {
+          const target = cubeSlug ? getCubeBySlug(cubeSlug.trim(), scope) : cube;
+          if (!target) return { ok: false, error: `Cube not found.` };
+          const created = createSchedule({
+            cubeId: target.id,
+            cron,
+            instruction,
+            scope,
+          });
+          return {
+            ok: true,
+            summary: `Scheduled task for ${target.name} on cron "${created.cron}"`,
+            task: {
+              id: created.id,
+              cubeName: target.name,
+              cron: created.cron,
+              instruction: created.instruction,
+              nextRunAt: created.nextRunAt,
+            },
+          };
+        } catch (error) {
+          return { ok: false, error: failure(error) };
+        }
+      },
+    }),
+    update_task: tool({
+      description: "Update an existing scheduled task's cron frequency, prompt instruction, or enabled state.",
+      inputSchema: z.object({
+        taskId: z.string().describe("The UUID of the scheduled task to modify"),
+        cron: z.string().optional(),
+        instruction: z.string().optional(),
+        enabled: z.boolean().optional(),
+      }),
+      execute: async ({ taskId, cron, instruction, enabled }) => {
+        try {
+          const updated = updateSchedule(taskId, { cron, instruction, enabled }, scope);
+          return {
+            ok: true,
+            summary: `Updated scheduled task (${updated.cron})`,
+            task: {
+              id: updated.id,
+              cron: updated.cron,
+              instruction: updated.instruction,
+              enabled: updated.enabled,
+              nextRunAt: updated.nextRunAt,
+            },
+          };
+        } catch (error) {
+          return { ok: false, error: failure(error) };
+        }
+      },
+    }),
+    delete_task: tool({
+      description: "Delete a scheduled task by its task ID.",
+      inputSchema: z.object({
+        taskId: z.string().describe("The UUID of the scheduled task to remove"),
+      }),
+      execute: async ({ taskId }) => {
+        try {
+          deleteSchedule(taskId, scope);
+          return { ok: true, summary: "Deleted scheduled task." };
+        } catch (error) {
+          return { ok: false, error: failure(error) };
+        }
+      },
+    }),
+  } satisfies ToolSet;
+}
+
 function activityLine(output: unknown): string {
   if (output && typeof output === "object" && "summary" in output) {
     const summary = (output as { summary?: unknown }).summary;
@@ -181,26 +308,54 @@ function activityLine(output: unknown): string {
   return "Used the computer";
 }
 
-function buildCubeAgent(cube: Cube, options: { handoff: boolean; manage: boolean }) {
-  const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes())}` : "";
+function buildCubeAgent(
+  cube: Cube,
+  options: { handoff: boolean; manage: boolean },
+  providerKey?: string,
+  providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+) {
+  const orgId = cube.orgId || "default";
+  const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
   return new ToolLoopAgent({
-    model: languageModel(cube.model),
+    model: languageModel(cube.model, providerKey, providerId),
     instructions: `${cube.instructions}\n\n${computerBlock(cube, options.handoff)}${roster}`,
     tools: {
-      ...computerTools({ slug: cube.slug, name: cube.name, isMaestro: cube.isMaestro }),
+      ...computerTools({
+        slug: cube.slug,
+        name: cube.name,
+        isMaestro: cube.isMaestro,
+        orgId: cube.orgId,
+        userId: cube.userId,
+        safeMode: approvalOptions?.safeMode,
+        approvedCommands: approvalOptions?.approvedCommands,
+        approvedWrites: approvalOptions?.approvedWrites,
+        abortSignal: approvalOptions?.abortSignal,
+      }),
+      ...scheduleTools(cube),
       ...(options.handoff ? { handoff: handoffTool(cube) } : {}),
-      ...(options.manage ? manageTools() : {}),
+      ...(options.manage ? manageTools(cube) : {}),
     },
     stopWhen: isStepCount(options.manage ? 16 : 12),
   });
 }
 
-export function buildMaestroAgent(cube: Cube) {
-  return buildCubeAgent(cube, { handoff: true, manage: true });
+export function buildMaestroAgent(
+  cube: Cube,
+  providerKey?: string,
+  providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+) {
+  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId, approvalOptions);
 }
 
-export function buildSpecialistAgent(cube: Cube) {
-  return buildCubeAgent(cube, { handoff: true, manage: false });
+export function buildSpecialistAgent(
+  cube: Cube,
+  providerKey?: string,
+  providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+) {
+  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId, approvalOptions);
 }
 
 export async function runCubeInstruction(
@@ -208,7 +363,7 @@ export async function runCubeInstruction(
   instruction: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const agent = buildCubeAgent(cube, { handoff: false, manage: false });
+  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, undefined, undefined, { abortSignal: signal });
   const result = await agent.generate({ prompt: instruction, abortSignal: signal });
   return result.text;
 }
