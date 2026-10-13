@@ -215,12 +215,18 @@ export function ProviderModal({
           apiKey: effectiveKey,
         }),
       });
-      const body = (await res.json()) as {
-        ok: boolean;
-        message?: string;
-        error?: string;
-        models?: string[];
-      };
+      const text = await res.text().catch(() => "");
+      let body: { ok: boolean; message?: string; error?: string; models?: string[] };
+      try {
+        body = text ? JSON.parse(text) : { ok: false, error: "Empty response from server" };
+      } catch {
+        setTestResult({
+          id: providerId,
+          ok: false,
+          message: `Server returned HTTP ${res.status}${text ? `: ${text.slice(0, 100)}` : " (empty response)"}`,
+        });
+        return;
+      }
       setTestResult({
         id: providerId,
         ok: body.ok,

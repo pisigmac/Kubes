@@ -3,6 +3,10 @@
 import { useMemo, useState } from "react";
 import { CodeBlock } from "@/components/code-block";
 import { MarkdownView } from "@/components/markdown-view";
+import { CsvGridStudio } from "@/components/studios/csv-grid-studio";
+import { MermaidStudio } from "@/components/studios/mermaid-studio";
+import { PreviewSandbox } from "@/components/studios/preview-sandbox";
+import { isMermaidDiagram } from "@/lib/computer/diagram";
 
 export interface ArtifactFile {
   name: string;
@@ -20,7 +24,11 @@ export function ArtifactCanvas({
 }) {
   const [tab, setTab] = useState<"preview" | "source">("preview");
   const [copied, setCopied] = useState(false);
-  const [searchFilter, setSearchFilter] = useState("");
+
+  const isMermaid = useMemo(() => {
+    if (!artifact) return false;
+    return isMermaidDiagram(artifact.name, artifact.content) || artifact.language === "mermaid";
+  }, [artifact]);
 
   const isMarkdown = useMemo(() => {
     if (!artifact) return false;
@@ -40,62 +48,6 @@ export function ArtifactCanvas({
     if (!artifact) return false;
     return artifact.name.endsWith(".html") || artifact.language === "html";
   }, [artifact]);
-
-  const csvData = useMemo(() => {
-    if (!isCsv || !artifact) return null;
-    const lines = artifact.content.trim().split("\n").filter(Boolean);
-    if (lines.length === 0) return null;
-
-    const headers = lines[0].split(",").map((h) => h.trim().replace(/^["']|["']$/g, ""));
-    const rows = lines.slice(1).map((line) => {
-      // Basic CSV splitter handling quotes
-      const values: string[] = [];
-      let current = "";
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === '"') inQuotes = !inQuotes;
-        else if (char === "," && !inQuotes) {
-          values.push(current.trim().replace(/^["']|["']$/g, ""));
-          current = "";
-        } else {
-          current += char;
-        }
-      }
-      values.push(current.trim().replace(/^["']|["']$/g, ""));
-      return values;
-    });
-
-    // Compute numerical column totals (e.g. for financial ledgers)
-    const columnSums: Record<number, number> = {};
-    for (let colIdx = 0; colIdx < headers.length; colIdx++) {
-      let isNumericCol = true;
-      let sum = 0;
-      for (const row of rows) {
-        const rawVal = row[colIdx]?.replace(/[^0-9.-]+/g, "") || "";
-        const num = parseFloat(rawVal);
-        if (isNaN(num)) {
-          isNumericCol = false;
-          break;
-        }
-        sum += num;
-      }
-      if (isNumericCol && rows.length > 0) {
-        columnSums[colIdx] = sum;
-      }
-    }
-
-    return { headers, rows, columnSums };
-  }, [isCsv, artifact]);
-
-  const filteredCsvRows = useMemo(() => {
-    if (!csvData) return [];
-    if (!searchFilter.trim()) return csvData.rows;
-    const lower = searchFilter.toLowerCase();
-    return csvData.rows.filter((row) =>
-      row.some((cell) => cell.toLowerCase().includes(lower)),
-    );
-  }, [csvData, searchFilter]);
 
   if (!artifact) return null;
 
@@ -123,7 +75,7 @@ export function ArtifactCanvas({
     URL.revokeObjectURL(url);
   }
 
-  const hasPreview = isMarkdown || isCsv || isHtml;
+  const hasPreview = isMarkdown || isCsv || isHtml || isMermaid;
 
   return (
     <aside
@@ -146,6 +98,14 @@ export function ArtifactCanvas({
             {isCsv ? (
               <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
                 CSV Studio
+              </span>
+            ) : isMermaid ? (
+              <span className="rounded-full bg-[#e7ff3a]/20 px-2 py-0.5 font-mono text-[10px] text-[#e7ff3a]">
+                Mermaid Studio
+              </span>
+            ) : isHtml ? (
+              <span className="rounded-full bg-purple-500/20 px-2 py-0.5 font-mono text-[10px] text-purple-300">
+                Preview Sandbox
               </span>
             ) : isMarkdown ? (
               <span className="rounded-full bg-blue-500/20 px-2 py-0.5 font-mono text-[10px] text-blue-300">
@@ -238,72 +198,17 @@ export function ArtifactCanvas({
       {/* Body Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* CSV Studio View */}
-        {isCsv && tab === "preview" && csvData ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <input
-                type="text"
-                placeholder="Filter table rows..."
-                value={searchFilter}
-                onChange={(e) => setSearchFilter(e.target.value)}
-                className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 font-mono text-xs text-white outline-none focus:border-[#e7ff3a]"
-              />
-              <span className="text-xs text-white/40 font-mono">
-                {filteredCsvRows.length} / {csvData.rows.length} rows
-              </span>
-            </div>
-
-            <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/40">
-              <table className="w-full border-collapse text-left text-xs font-mono">
-                <thead>
-                  <tr className="border-b border-white/10 bg-white/[0.04] text-white/80">
-                    {csvData.headers.map((header, idx) => (
-                      <th key={idx} className="px-3 py-2.5 font-semibold">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {filteredCsvRows.map((row, rowIdx) => (
-                    <tr key={rowIdx} className="hover:bg-white/[0.03] transition-colors">
-                      {row.map((cell, cellIdx) => (
-                        <td key={cellIdx} className="px-3 py-2 text-white/70">
-                          {cell}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-                {Object.keys(csvData.columnSums).length > 0 ? (
-                  <tfoot>
-                    <tr className="border-t border-white/15 bg-white/[0.06] font-semibold text-white">
-                      {csvData.headers.map((_, colIdx) => (
-                        <td key={colIdx} className="px-3 py-2 text-[#e7ff3a]">
-                          {csvData.columnSums[colIdx] !== undefined
-                            ? `Σ ${csvData.columnSums[colIdx].toLocaleString(undefined, {
-                                maximumFractionDigits: 2,
-                              })}`
-                            : colIdx === 0
-                              ? "Total"
-                              : ""}
-                        </td>
-                      ))}
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
+        {isCsv && tab === "preview" ? (
+          <CsvGridStudio csvContent={artifact.content} fileName={artifact.name} />
+        ) : isMermaid && tab === "preview" ? (
+          /* Interactive Mermaid Studio Preview */
+          <div className="h-full min-h-[450px] rounded-xl border border-white/10 overflow-hidden">
+            <MermaidStudio chart={artifact.content} fileName={artifact.name} />
           </div>
         ) : isHtml && tab === "preview" ? (
-          /* HTML Sandbox Preview */
-          <div className="h-full min-h-[400px] rounded-xl border border-white/10 bg-white overflow-hidden">
-            <iframe
-              srcDoc={artifact.content}
-              title="HTML Artifact Sandbox"
-              sandbox="allow-scripts"
-              className="h-full w-full min-h-[400px] border-0"
-            />
+          /* HTML Live Preview Sandbox */
+          <div className="h-full min-h-[450px] rounded-xl border border-white/10 overflow-hidden">
+            <PreviewSandbox content={artifact.content} fileName={artifact.name} />
           </div>
         ) : isMarkdown && tab === "preview" ? (
           /* Markdown Preview */

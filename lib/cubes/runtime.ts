@@ -1,6 +1,6 @@
 import { isStepCount, ToolLoopAgent, tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { languageModel } from "../ai/provider.ts";
+import { getLanguageModel } from "../ai/provider.ts";
 import { computerTools } from "../computer/tools.ts";
 import { coerceModel } from "../ai/models.ts";
 import type { Cube, CubeMutationResult, HandoffResult } from "./types.ts";
@@ -318,7 +318,7 @@ function buildCubeAgent(
   const orgId = cube.orgId || "default";
   const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
   return new ToolLoopAgent({
-    model: languageModel(cube.model, providerKey, providerId),
+    model: getLanguageModel({ modelId: cube.model, providerKey, providerId }),
     instructions: `${cube.instructions}\n\n${computerBlock(cube, options.handoff)}${roster}`,
     tools: {
       ...computerTools({
@@ -362,8 +362,10 @@ export async function runCubeInstruction(
   cube: Cube,
   instruction: string,
   signal: AbortSignal,
+  providerKey?: string,
+  providerId?: string,
 ): Promise<string> {
-  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, undefined, undefined, { abortSignal: signal });
+  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, { abortSignal: signal });
   const result = await agent.generate({ prompt: instruction, abortSignal: signal });
   return result.text;
 }

@@ -153,3 +153,33 @@ test("Swarm Runner: handles task failure and skips downstream dependents", async
   assert.ok(eventTypes.includes("task_skipped"));
   assert.ok(eventTypes.includes("plan_completed"));
 });
+
+test("Swarm Runner: formats rate limit error with specialist details", async () => {
+  const plan: SwarmPlan = createSwarmPlan("Quota test", [
+    {
+      id: "task-quota",
+      parentCube: "maestro",
+      assignedCube: "job-hunt",
+      title: "Job hunt task",
+      instruction: "Find jobs",
+      dependencies: [],
+    },
+  ]);
+
+  const mockRateLimitedExecutor = async () => {
+    throw new Error("429 Too Many Requests: quota exceeded");
+  };
+
+  const executedPlan = await executeSwarmPlan({
+    plan,
+    executor: mockRateLimitedExecutor,
+    providerId: "gemini",
+  });
+
+  assert.equal(executedPlan.status, "failed");
+  const task = executedPlan.tasks.find((t) => t.id === "task-quota");
+  assert.equal(task?.status, "failed");
+  assert.ok(task?.error?.includes("[Rate Limit] Specialist 'job-hunt'"));
+  assert.ok(task?.error?.includes("provider 'gemini'"));
+});
+

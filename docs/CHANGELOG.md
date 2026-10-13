@@ -2,6 +2,16 @@
 
 All notable changes to the Kubes Autonomous AI Platform are documented in this file.
 
+## [1.6.0] - 2026-10-13
+
+### Added
+- **Interactive Visual Mermaid Studio (`components/studios/mermaid-studio.tsx`, `lib/computer/diagram.ts`)**: Built pan-and-zoom diagram canvas with mouse dragging, wheel zoom, zoom level indicator, layout orientation toggle (Top-to-Down `TD` vs Left-to-Right `LR`), high-DPI PNG export with dark background, and 1-click SVG export; added pure utility functions `cleanMermaidSource`, `isMermaidDiagram`, and `toggleDiagramOrientation` with unit test suite (`lib/computer/diagram.test.ts`).
+- **Interactive CSV Grid Studio & Financial Distribution Charts (`components/studios/csv-grid-studio.tsx`, `lib/computer/csv_grid.ts`)**: RFC-4180 compliant CSV parser with quote escaping; sortable table view with multi-column sorting indicators (`▲`/`▼`), real-time type-ahead search filter, and column totals footer (`Σ Sum`, `Avg`); dynamic native SVG bar distribution chart with category and value series selectors; 1-click CSV export; comprehensive unit tests (`lib/computer/csv_grid.test.ts`).
+- **Live Sandboxed Iframe Code Preview Runner (`components/studios/preview-sandbox.tsx`, `lib/computer/sandbox_preview.ts`)**: Secure HTML/component preview runner isolated inside strict `sandbox="allow-scripts"` iframe with zero host DOM access; embedded postMessage logging harness intercepting `console.log`, `info`, `warn`, `error`, and unhandled promise rejections; expandable Console Inspector drawer with colored tags, timestamps, message counts, and error badges; multi-device viewport mode selector (100% Responsive, Desktop 1024px, Tablet 768px, Mobile 375px); unit tests (`lib/computer/sandbox_preview.test.ts`).
+- **Unified Artifact Canvas Routing (`components/artifact-canvas.tsx`)**: Replaced static previews with automatic routing to specialized studios based on file extension and content heuristics (`.mmd` -> Mermaid Studio, `.csv` -> CSV Studio, `.html` -> Preview Sandbox, `.md` -> Markdown View, code -> CodeBlock) with contextual header badges.
+
+---
+
 ## [1.5.0] - 2026-10-13
 
 ### Added

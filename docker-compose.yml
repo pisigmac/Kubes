@@ -9,16 +9,14 @@ services:
     restart: unless-stopped
     ports:
       - "${KUBES_WEB_PORT:-3000}:3000"
+    env_file:
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.x.ai/v1}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-grok-4.7}
-      - PRIMARY_MODEL=${PRIMARY_MODEL:-grok-4.7}
-      - FALLBACK_MODELS=${FALLBACK_MODELS:-grok-4,grok-3,gpt-4o,claude-3-7-sonnet}
-      - KUBEROUTE_GATEWAY_URL=${KUBEROUTE_GATEWAY_URL:-}
-      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
-      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-gemini-3.8-flash}
       - AUTH_MODE=${AUTH_MODE:-none}
       - CUBES_CHROME=/usr/bin/chromium
       - CUBES_COMPUTER_ROOT=/app/data/computer
@@ -51,8 +49,14 @@ services:
     container_name: kubes-scheduler
     restart: unless-stopped
     command: ["node", "--experimental-strip-types", "scripts/scheduler.ts"]
+    env_file:
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-gemini-3.8-flash}
       - CUBES_COMPUTER_ROOT=/app/data/computer
     volumes:
       - kubes_data:/app/data

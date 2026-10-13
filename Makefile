@@ -1,37 +1,40 @@
-.PHONY: start stop restart status logs doctor seed test build lint verify test-e2e
+.PHONY: start stop restart status logs doctor seed test build lint verify test-e2e help
 
 start:
-	@bash ./scripts/start_all.sh $(ARGS)
+	@./kubes start $(ARGS)
 
 stop:
-	@bash ./scripts/stop_all.sh $(ARGS)
+	@./kubes stop $(ARGS)
 
 restart:
-	@bash ./scripts/restart_all.sh $(ARGS)
+	@./kubes restart $(ARGS)
 
 status:
-	@bash ./scripts/status.sh
+	@./kubes status
 
 logs:
-	@bash ./scripts/logs.sh $(ARGS)
+	@./kubes logs $(ARGS)
 
 doctor:
-	@bash ./scripts/doctor.sh
+	@./kubes doctor
 
 seed:
-	@bash ./scripts/seed_data.sh
+	@./kubes seed
 
 test:
-	@pnpm test
+	@./kubes test $(ARGS)
 
 test-e2e:
 	@pnpm run test:ui
 
 build:
-	@pnpm build
+	@./kubes build
 
 lint:
-	@pnpm lint
+	@./kubes lint
 
 verify:
-	@bash ./scripts/verify.sh
+	@./kubes verify
+
+help:
+	@./kubes help

@@ -2,6 +2,7 @@
   "name": "kubes",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.17.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,11 +10,12 @@
     "lint": "eslint",
     "test": "node --experimental-strip-types --test lib/*.test.ts lib/computer/*.test.ts lib/cubes/*.test.ts lib/memory/*.test.ts lib/auth/*.test.ts lib/ai/*.test.ts app/api/*.test.ts",
     "schedules": "node --experimental-strip-types scripts/scheduler.ts",
-    "start:all": "bash scripts/start-all.sh",
-    "stop:all": "bash scripts/stop-all.sh",
+    "start:all": "bash scripts/start_all.sh",
+    "stop:all": "bash scripts/stop_all.sh",
     "status": "bash scripts/status.sh",
     "verify": "bash scripts/verify.sh",
-    "test:ui": "node --experimental-strip-types scripts/test-ui-play.ts"
+    "test:ui": "node --experimental-strip-types scripts/test-ui-play.ts",
+    "kubes": "./kubes"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.83",
@@ -22,6 +24,7 @@
     "better-sqlite3": "^13.0.3",
     "highlight.js": "^11.12.0",
     "jose": "^6.2.12",
+    "mermaid": "^12.1.0",
     "next": "16.3.8",
     "puppeteer-core": "^25.12.0",
     "react": "19.2.8",

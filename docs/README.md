@@ -7,10 +7,12 @@ Kubes is an enterprise platform that coordinates autonomous AI specialists ("Cub
 ## Highlights
 
 - 🤖 **Autonomous Multi-Cube Specialist Architecture**: Specialized pods with custom pain points and instructions.
+- ⚡ **Multi-Agent Swarm Collaboration**: Directed acyclic graph (DAG) objective decomposition with parallel execution and executive synthesis.
+- 🎨 **Interactive Visual Artifact Studios**: Pan/zoom Mermaid diagrams with SVG/PNG exports, sortable CSV data grids with distribution charts, and isolated iframe preview runners with console inspectors.
 - 🔒 **Enterprise Multi-Tenant DeskID Security**: Cryptographic JWKS RS256/ES256 verification and fail-closed RBAC gating.
-- ⚡ **Process-Isolated Headless Chromium**: Dedicated browser instances per organization with request interception.
+- 🌐 **Process-Isolated Headless Chromium**: Dedicated browser instances per organization with request interception.
 - ⏰ **Autonomous Cron Scheduler & Executive Digest**: Continuous background tasks with multi-channel digest broadcasts (webhooks, email, desktop, markdown).
-- 🛡 **Bubblewrap Linux Namespace Sandboxing**: Unprivileged containerized bash and tool execution.
+- 🛡 **Bubblewrap Linux Namespace Sandboxing**: Unprivileged containerized bash and tool execution with out-of-band credential proxying.
 
 ---
 

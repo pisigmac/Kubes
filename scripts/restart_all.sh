@@ -6,6 +6,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "🔄 Restarting Kubes stack..."
-"${SCRIPT_DIR}/stop-all.sh" "$@" || true
+"${SCRIPT_DIR}/stop_all.sh" "$@" || true
 sleep 1
-"${SCRIPT_DIR}/start-all.sh" "$@"
+"${SCRIPT_DIR}/start_all.sh" "$@"

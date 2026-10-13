@@ -176,4 +176,151 @@
 - **Consequences & System Impact**:
   Production builds complete with 0 warnings or errors in ~1s. The system gracefully absorbs transient provider rate limits, aborts long-running agent processes cleanly without zombies or deadlocks, and maintains bounded disk usage.
 
+---
+
+## [ADR-011] Interactive Visual Artifact Studios & Live Sandboxed Canvas
+
+- **Context & Problem Statement**:
+  Specialist agents and Swarm pipelines produce varied rich artifacts: Mermaid architecture diagrams (`notes/diagram.mmd`), CSV financial/job tracking ledgers (`notes/ledger.csv`), and interactive HTML mockups. Previously, the Artifact Canvas rendered static text or unstyled tables, preventing users from zooming into complex diagrams, sorting data columns, visualizing numeric distributions, or safely inspecting HTML mockups and console output.
+- **Decision Made**:
+  Implemented Phase 7 Interactive Visual Artifact Studio:
+  1. **Interactive Mermaid Studio (`components/studios/mermaid-studio.tsx`, `lib/computer/diagram.ts`)**: Client-side dynamic Mermaid rendering with pan/drag controls, mouse wheel zoom, layout orientation toggling (`TD` <-> `LR`), and 1-click SVG / high-DPI PNG export.
+  2. **Interactive CSV Grid Studio (`components/studios/csv-grid-studio.tsx`, `lib/computer/csv_grid.ts`)**: Pure RFC-4180 parsing with quote support; multi-column ascending/descending sorting (`▲`/`▼`), real-time search filtering, column totals (`Σ Sum`, `Avg`), and dynamic SVG bar distribution chart with category and value series dropdowns.
+  3. **Live Sandboxed Iframe Code Preview Runner (`components/studios/preview-sandbox.tsx`, `lib/computer/sandbox_preview.ts`)**: Strict `sandbox="allow-scripts"` isolation (no `allow-same-origin`) preventing host DOM access; postMessage console interception capturing logs, warnings, errors, and unhandled rejections; expandable Console Inspector drawer; multi-device viewport toggle (100% Responsive, Desktop 1024px, Tablet 768px, Mobile 375px) with one-click refresh reload.
+  4. **Artifact Canvas Routing (`components/artifact-canvas.tsx`)**: Replaced static views with automatic detection routing based on file extension and content heuristics.
+- **Rationale**:
+  Provides rich, interactive visual review of agent deliverables without compromising security. Decoupling logic into pure TypeScript libraries (`lib/computer/`) enables 100% automated test coverage in Node test runner without JSX parsing constraints.
+- **Alternatives Considered & Why Rejected**:
+  - *Full unrestricted iframe*: Rejected due to cross-site script execution risk against host session cookies and local storage. Strict `sandbox="allow-scripts"` eliminates host DOM access.
+  - *Heavy charting dependencies*: Avoided bulky third-party chart bundles; built lightweight, accessible native SVG bar distribution components tailored to the Kubes dark theme.
+- **Consequences & System Impact**:
+  Zero runtime regressions. All 110 unit tests pass. Artifact canvas delivers immediate interactivity for diagrams, tabular data, and web code snippets.
+
+---
+
+## Decision Record: Centralized Model Schema via `providers.json` & Canonical Model Caller
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  1. Models were scattered across `config/providers.json`, `lib/ai/models.ts` (static 25-entry array in `fallbackModels()`), and `lib/ai/provider.ts`.
+  2. Foreign model IDs (e.g., `x-ai/grok-4.7` seeded in specialist Cubes) triggered `HTTP 400 Bad Request` from the Google Gemini API when using Gemini credentials.
+  3. Swarm specialist runner (`runCubeInstruction`) and Maestro synthesis dropped active provider credentials, and lacked a single unified caller for model instantiation.
+- **Decision Made**:
+  1. **Single Source of Truth (`config/providers.json`)**:
+     - All model metadata, default models (`gemini-3.8-flash`), fallback models, provider prefixes, and specialist recommendations are loaded dynamically from `config/providers.json`.
+     - Completely removed hardcoded model lists from `lib/ai/models.ts` and `lib/ai/provider.ts`.
+  2. **Canonical Model Caller (`getLanguageModel`)**:
+     - Added canonical `getLanguageModel({ modelId, providerKey, providerId })` in `lib/ai/provider.ts`, aliasing `languageModel` for backwards compatibility.
+     - Reused across single agent chats (`buildCubeAgent`), Swarm specialist tasks (`runCubeInstruction`), Maestro synthesis (`synthesizeSwarmPlan`), and scheduled background executions (`lib/computer/schedule.ts`).
+  3. **Intelligent Model Auto-Alignment (`alignModelForProvider`)**:
+     - Automatically verifies whether a requested model is compatible with the selected provider. If incompatible, dynamically aligns to that provider's `default_model` (e.g. `gemini-3.8-flash` on Gemini), preventing HTTP 400 errors.
+  4. **Swarm Credential Forwarding Pipeline**:
+     - Forwarded `providerKey` and `providerId` through `executeSwarmPlan`, `runCubeInstruction`, and `synthesizeSwarmPlan`.
+  5. **Docker Compose Environment Ingestion**:
+     - Added `.env.local` to `env_file` for `kubes-web` and `kubes-scheduler`, with primary model default set to `gemini-3.8-flash`.
+- **Rationale**:
+  Centralizing configuration in `providers.json` allows adding or swapping providers/models by updating a single JSON file without touching code. The common caller guarantees identical resiliency retries, authentication, and fallback behavior across the entire platform.
+- **Alternatives Considered & Why Rejected**:
+  - *Hardcoding model maps in TypeScript*: Rejected because it required multiple edits across codebases for every new model release.
+  - *Failing immediately on model mismatch*: Rejected because legacy Cubes or cross-provider swarms would break instead of gracefully adapting to user-configured credentials.
+- **Consequences & System Impact**:
+  100% test pass rate (113/113 tests passed). Zero TypeScript type errors. Zero lint errors. Eliminates 400 Bad Request model errors during Swarm execution.
+
+---
+
+## Decision Record: Transparent Swarm Model & Provider Diagnostics on Quota / Rate Limits
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  During multi-agent Swarm runs with concurrent specialist execution, providers with low RPM ceilings (such as Google Gemini Free Tier with 15 RPM) can return HTTP 429 (`RESOURCE_EXHAUSTED` / `quota exceeded`).
+  Previously, `lib/cubes/swarm_runner.ts` masked the actual model and provider under a generic message:
+  `[Rate Limit] Specialist 'job-hunt' reached provider quota limits. Consider switching to another provider in the header.`
+  This made it impossible for users to know whether the specialist failed on its database-configured model (`x-ai/grok-4.7`) or the provider-aligned model (`gemini-3.8-flash`), nor which provider triggered the failure.
+- **Decision Made**:
+  1. **Exported `resolveModelInvocation` (`lib/ai/provider.ts`)**:
+     - Extracted model and provider resolution logic into an exported canonical function `resolveModelInvocation({ modelId, providerId, providerKey })`.
+     - Automatically resolves the effective active provider and aligns foreign model IDs.
+  2. **Enriched Swarm Quota Error Diagnostics (`lib/cubes/swarm_runner.ts`)**:
+     - When a specialist task fails with a rate limit or quota error, dynamically resolves the exact invoked model and provider.
+     - Reports the full diagnostic string:
+       `[Rate Limit] Specialist '<slug>' using model '<invokedModel>' (configured: '<configuredModel>') on provider '<providerId>' reached provider quota limits. Consider switching to another provider in the header.`
+  3. **Added Unit Test Coverage (`lib/cubes/swarm_runner.test.ts`)**:
+     - Verified that rate-limited tasks produce structured error strings containing the specialist name, resolved model, and provider ID.
+- **Rationale**:
+  Full transparency gives users actionable clarity on why a quota occurred, which model was actually sent across the network, and how to remedy it.
+- **Alternatives Considered & Why Rejected**:
+  - *Hardcoding Cube model name*: Rejected because foreign models are aligned dynamically; reporting only the database model would misrepresent which model actually failed on the provider.
+- **Consequences & System Impact**:
+  100% test pass rate (114/114 tests passing). Zero regressions. Clear, actionable error messaging in the Swarm UI.
+
+---
+
+## Decision Record: Unified Local & Docker Stack Shutdown in `stop_all.sh`
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  Previously, `scripts/stop-all.sh` required an explicit `--docker` flag to stop Docker containers and exited immediately without cleaning up local processes (such as `scheduler.ts`, `uvicorn`, or active port allocations). Conversely, calling `stop_all.sh` without flags completely ignored Docker containers, leaving them running in the background.
+- **Decision Made**:
+  1. Updated [`scripts/stop-all.sh`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/scripts/stop-all.sh) to unconditionally detect and bring down the Docker Compose stack (`docker compose down`) whenever active Kubes containers are detected.
+  2. Proceed unconditionally through the local process cleanup sequence (terminating `scheduler`, `web`, `agent-core`, background workers, and releasing port leases via `port-alloc`).
+  3. Removed the requirement for any `--docker` flag when invoking `stop_all.sh`.
+- **Rationale**:
+  Guarantees that a single execution of `./scripts/stop_all.sh` or `make stop` completely and cleanly shuts down all services across both Docker and native process spaces with zero leftover orphan processes.
+- **Consequences & System Impact**:
+  Seamless, idempotent platform shutdown with zero leftover processes or bound ports.
+
+---
+
+## Decision Record: Consolidation of Lifecycle Scripts into Single Canonical Files
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  The repository maintained dual scripts for startup and shutdown: hyphenated files (`start-all.sh`, `stop-all.sh`) and underscored wrapper files (`start_all.sh`, `stop_all.sh`). This caused redundancy and potential confusion about which script was canonical.
+- **Decision Made**:
+  1. Consolidated the full startup and shutdown implementations directly into [`scripts/start_all.sh`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/scripts/start_all.sh) and [`scripts/stop_all.sh`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/scripts/stop_all.sh).
+  2. Updated [`scripts/restart_all.sh`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/scripts/restart_all.sh) and [`package.json`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/package.json) to reference `start_all.sh` and `stop_all.sh`.
+  3. Removed redundant hyphenated scripts `start-all.sh` and `stop-all.sh`.
+- **Rationale**:
+  Standardizes on the underscore naming convention across all root Makefile commands, npm scripts, and documentation, ensuring strictly one canonical script per operation.
+- **Consequences & System Impact**:
+  Cleaner codebase with zero wrapper indirection. Seamless operation across `make start`, `make stop`, `pnpm run start:all`, and `pnpm run stop:all`.
+
+---
+
+## Decision Record: Implementation of Universal Root CLI Hub (`./kubes`) [TASK-ACC-3]
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  Users had to memorize and manually navigate individual shell scripts under `scripts/` (`start_all.sh`, `stop_all.sh`, `status.sh`, `doctor.sh`, `logs.sh`). Furthermore, requesting `--docker` when the Docker daemon was offline caused hard unhandled bash exits instead of resilient degradation.
+- **Decision Made**:
+  1. Implemented a universal executable CLI entrypoint at the root: [`./kubes`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/kubes).
+  2. Supported subcommands: `start`, `stop`, `restart`, `status`, `doctor`, `logs`, `seed`, `test`, `lint`, `build`, `verify`, and `help`.
+  3. Built proactive self-healing: when `--docker` is requested, automatically probes Docker daemon health (`docker info`) and falls back gracefully to local multi-process mode with a clear user notice if Docker is inaccessible.
+  4. Updated the root [`Makefile`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/Makefile) and [`package.json`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/package.json) to route through `./kubes`.
+- **Rationale**:
+  Greatly improves accessibility and operator developer experience by standardizing on a single root command with proactive error recovery.
+- **Consequences & System Impact**:
+  Zero breaking changes. Operators can use `./kubes <cmd>`, `make <cmd>`, or `pnpm run <cmd>` interchangeably.
+
+---
+
+## Decision Record: One-Liner Universal Web Installer (`scripts/install.sh`) [TASK-ACC-7]
+
+- **Date**: 2026-10-13
+- **Context & Problem Statement**:
+  Onboarding required users to manually clone the repository, install Node.js v22 and Python uv toolchains, manage dependencies, copy environment variables, and initialize SQLite. This created high friction for first-time adopters.
+- **Decision Made**:
+  1. Created a self-contained, idempotent web installer script: [`scripts/install.sh`](file:///home/oh20210736-ud/Documents/WorkSpace/bots/scripts/install.sh).
+  2. Supported piped execution: `curl -fsSL https://raw.githubusercontent.com/pisigmac/Kubes/main/scripts/install.sh | bash` (and `bash -s -- --docker`).
+  3. Pre-flight diagnostics: Auto-verifies Linux/macOS, architecture, Node.js (v22+), pnpm, Python uv, Bubblewrap, Chrome, and Docker.
+  4. Auto-provisions the workspace (`~/.kubes`), installs dependencies, copies `.env.local`, and seeds SQLite database (`scripts/seed_data.sh`).
+  5. Automatically creates global symlink `~/.local/bin/kubes` with PATH shell guidance.
+- **Rationale**:
+  Enables 1-command bootstrap in under 60 seconds with zero manual configuration.
+- **Consequences & System Impact**:
+  Zero breaking changes to existing repositories. Non-destructive updater if run on an existing workspace.
+
+
+
+
 

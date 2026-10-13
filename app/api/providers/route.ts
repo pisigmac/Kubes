@@ -98,7 +98,18 @@ export async function POST(request: Request) {
         });
       }
 
-      const data = (await response.json()) as { data?: { id?: string }[] };
+      let data: { data?: { id?: string }[] } = {};
+      try {
+        data = (await response.json()) as { data?: { id?: string }[] };
+      } catch {
+        const rawText = await response.text().catch(() => "");
+        return Response.json({
+          ok: false,
+          status: response.status,
+          latencyMs,
+          error: `Provider returned invalid JSON: ${rawText.slice(0, 120)}`,
+        });
+      }
       const models = Array.isArray(data.data)
         ? data.data
             .map((model) => model.id?.trim() ?? "")

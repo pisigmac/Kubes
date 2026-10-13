@@ -481,16 +481,66 @@ export function resolveBaseURL(): string {
   return "https://generativelanguage.googleapis.com/v1beta/openai/";
 }
 
+export function matchModelForProvider(
+  modelId: string,
+  provider: ProviderJsonItem | ProviderDefinition | { id: string; model_prefixes?: string[]; modelPrefixes?: string[]; matchModel?: (m: string) => boolean }
+): boolean {
+  if ("matchModel" in provider && typeof provider.matchModel === "function") {
+    return provider.matchModel(modelId);
+  }
+  const lower = modelId.toLowerCase();
+  const prefixes: string[] =
+    "model_prefixes" in provider && Array.isArray(provider.model_prefixes)
+      ? provider.model_prefixes
+      : "modelPrefixes" in provider && Array.isArray((provider as { modelPrefixes?: string[] }).modelPrefixes)
+      ? (provider as { modelPrefixes?: string[] }).modelPrefixes || []
+      : [];
+
+  if (prefixes.length === 0) return false;
+  return prefixes.some((prefix: string) =>
+    prefix === "/" ? lower.includes("/") : lower.startsWith(prefix.toLowerCase()),
+  );
+}
+
+export function alignModelForProvider(
+  modelId: string,
+  provider: ProviderJsonItem | ProviderDefinition | { id: string; defaultModel?: string; default_model?: string; models?: string[]; fallbackModels?: string[] }
+): string {
+  if (provider.id === "custom" || provider.id === "openrouter") {
+    return modelId;
+  }
+
+  const defaultModelStr =
+    ("default_model" in provider && provider.default_model) ||
+    ("defaultModel" in provider && (provider as { defaultModel?: string }).defaultModel) ||
+    "gemini-3.8-flash";
+
+  const modelsList =
+    ("models" in provider && Array.isArray(provider.models) && provider.models) ||
+    ("fallbackModels" in provider && Array.isArray((provider as { fallbackModels?: string[] }).fallbackModels) && (provider as { fallbackModels?: string[] }).fallbackModels) ||
+    [];
+
+  if (matchModelForProvider(modelId, provider) || modelsList.includes(modelId)) {
+    return modelId;
+  }
+  return defaultModelStr;
+}
+
 export function defaultModel(): string {
   if (process.env.PRIMARY_MODEL?.trim()) return process.env.PRIMARY_MODEL.trim();
-  if (process.env.OPENAI_MODEL?.trim()) return process.env.OPENAI_MODEL.trim();
 
+  const config = loadProvidersConfig();
   const registry = getLoadedRegistry();
+
   for (const p of registry) {
     const key = getProviderEnvKey(p);
     if (key) return p.defaultModel;
   }
-  return "gemini-2.5-flash";
+
+  const defaultProv = registry.find((p) => p.id === config.default_provider);
+  if (defaultProv) return defaultProv.defaultModel;
+
+  return registry[0]?.defaultModel || "gemini-3.8-flash";
 }
 
 export function fallbackModelsList(): string[] {
@@ -501,10 +551,11 @@ export function fallbackModelsList(): string[] {
       .map((s) => s.trim())
       .filter(Boolean);
   }
-  const registry = getLoadedRegistry();
+  const config = loadProvidersConfig();
   const collected: string[] = [];
-  for (const p of registry) {
-    collected.push(...p.fallbackModels);
+  for (const p of config.providers) {
+    if (p.default_model) collected.push(p.default_model);
+    if (Array.isArray(p.models)) collected.push(...p.models);
   }
   return [...new Set(collected.filter(Boolean))];
 }
@@ -606,7 +657,7 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
           baseURL: getProviderEnvURL(activeProvider),
           apiKey: key || "ollama",
           headers,
-          modelId,
+          modelId: alignModelForProvider(modelId, activeProvider),
         };
       }
     }
@@ -628,21 +679,22 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
         baseURL: getProviderEnvURL(provider),
         apiKey: key,
         headers,
-        modelId,
+        modelId: alignModelForProvider(modelId, provider),
       };
     }
   }
 
-  // 3. Fallback
+  // 4. Fallback
   const defaultKey = resolveApiKey() || "";
   const defaultURL = resolveBaseURL();
+  const defaultProv = registry.find((p) => p.id === "gemini");
   return {
     providerId: "gemini",
     name: "Google Gemini",
     baseURL: defaultURL,
     apiKey: defaultKey,
     headers: {},
-    modelId,
+    modelId: defaultProv ? alignModelForProvider(modelId, defaultProv) : "gemini-3.8-flash",
   };
 }
 
@@ -660,24 +712,52 @@ export function gatewayInfo(): { isGateway: boolean; provider: string; url: stri
   return { isGateway: false, provider: "direct", url };
 }
 
-export function languageModel(modelId: string, explicitApiKey?: string, explicitProviderId?: string) {
+export interface ModelInvocationOptions {
+  modelId?: string;
+  providerKey?: string;
+  providerId?: string;
+}
+
+export function resolveModelInvocation(options?: ModelInvocationOptions | string): ResolvedProvider {
+  const opts: ModelInvocationOptions =
+    typeof options === "string" ? { modelId: options } : (options ?? {});
+
+  const requestedModel = opts.modelId?.trim() || defaultModel();
+  const explicitApiKey = opts.providerKey?.trim();
+  const explicitProviderId = opts.providerId?.trim();
+
   const registry = getLoadedRegistry();
   const explicitProvider = explicitProviderId
     ? registry.find((provider) => provider.id === explicitProviderId)
     : undefined;
-  const resolved = explicitProvider && explicitApiKey?.trim()
-    ? {
-        providerId: explicitProvider.id,
-        name: explicitProvider.name,
-        baseURL: getProviderEnvURL(explicitProvider),
-        apiKey: explicitApiKey.trim(),
-        headers: explicitProvider.id === "openrouter"
-          ? { "HTTP-Referer": "http://localhost:3000", "X-Title": "Kubes" }
-          : {},
-        modelId,
-      }
-    : resolveProviderForModel(modelId);
-  const apiKey = explicitApiKey?.trim() || resolved.apiKey;
+
+  const key = explicitApiKey || (explicitProvider ? getProviderEnvKey(explicitProvider) : undefined);
+
+  if (explicitProvider && key) {
+    return {
+      providerId: explicitProvider.id,
+      name: explicitProvider.name,
+      baseURL: getProviderEnvURL(explicitProvider),
+      apiKey: key,
+      headers: explicitProvider.id === "openrouter"
+        ? { "HTTP-Referer": "http://localhost:3000", "X-Title": "Kubes" }
+        : {},
+      modelId: alignModelForProvider(requestedModel, explicitProvider),
+    };
+  }
+
+  return resolveProviderForModel(requestedModel);
+}
+
+/**
+ * Common canonical function for obtaining a configured LanguageModel instance.
+ * Resolves the provider from providers.json, automatically aligns foreign models,
+ * injects credentials and headers, and applies resilient retries.
+ */
+export function getLanguageModel(options?: ModelInvocationOptions | string) {
+  const resolved = resolveModelInvocation(options);
+
+  const apiKey = resolved.apiKey;
   if (!apiKey) {
     throw new Error(
       "No active AI Provider configured. Please set GEMINI_API_KEY (Free via Google AI Studio), GROQ_API_KEY (Free via Groq), OPENROUTER_API_KEY, or OPENAI_API_KEY in .env.local or the Providers modal.",
@@ -693,4 +773,8 @@ export function languageModel(modelId: string, explicitApiKey?: string, explicit
   });
 
   return provider.chat(resolved.modelId);
+}
+
+export function languageModel(modelId: string, explicitApiKey?: string, explicitProviderId?: string) {
+  return getLanguageModel({ modelId, providerKey: explicitApiKey, providerId: explicitProviderId });
 }

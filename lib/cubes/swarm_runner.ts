@@ -14,8 +14,9 @@ import {
   createSwarmPlan,
 } from "./swarm.ts";
 import { synthesizeSwarmPlan } from "./synthesizer.ts";
-import { isRateLimitOrQuotaError } from "../ai/provider.ts";
+import { isRateLimitOrQuotaError, resolveModelInvocation } from "../ai/provider.ts";
 import type { ResourceScope } from "../auth/deskid.ts";
+import type { Cube } from "./types.ts";
 
 export type SwarmRunnerEvent =
   | { type: "plan_started"; planId: string; totalTasks: number; totalBatches: number }
@@ -43,7 +44,7 @@ export interface SwarmRunnerOptions {
  * Executes a full SwarmPlan batch-by-batch according to its topological DAG dependencies.
  */
 export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<SwarmPlan> {
-  const { plan, scope, abortSignal, onEvent, executor } = options;
+  const { plan, scope, abortSignal, onEvent, executor, providerKey, providerId } = options;
 
   const validation = validateSwarmPlan(plan);
   if (!validation.valid) {
@@ -114,6 +115,7 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
         title: taskDef.title,
       });
 
+      let targetCube: Cube | undefined;
       try {
         // Build prompt with upstream context if task had dependencies
         let prompt = taskDef.instruction;
@@ -132,11 +134,17 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
         if (executor) {
           outputText = await executor(taskDef, prompt, abortController.signal);
         } else {
-          const targetCube = getCubeBySlug(taskDef.assignedCube, scope);
+          targetCube = getCubeBySlug(taskDef.assignedCube, scope);
           if (!targetCube) {
             throw new Error(`Assigned specialist Cube '${taskDef.assignedCube}' not found.`);
           }
-          outputText = await runCubeInstruction(targetCube, prompt, abortController.signal);
+          outputText = await runCubeInstruction(
+            targetCube,
+            prompt,
+            abortController.signal,
+            providerKey,
+            providerId,
+          );
         }
 
         const durationMs = Date.now() - startTime;
@@ -159,7 +167,27 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
         const durationMs = Date.now() - startTime;
         let errorMessage = err instanceof Error ? err.message : String(err);
         if (isRateLimitOrQuotaError(err)) {
-          errorMessage = `[Rate Limit] Specialist '${taskDef.assignedCube}' reached provider quota limits. Consider switching to another provider in the header.`;
+          let resolvedDetails = "";
+          try {
+            if (!targetCube) {
+              targetCube = getCubeBySlug(taskDef.assignedCube, scope);
+            }
+            if (targetCube) {
+              const invocation = resolveModelInvocation({
+                modelId: targetCube.model,
+                providerId,
+                providerKey,
+              });
+              const modelDesc =
+                invocation.modelId !== targetCube.model
+                  ? `'${invocation.modelId}' (configured: '${targetCube.model}')`
+                  : `'${invocation.modelId}'`;
+              resolvedDetails = ` using model ${modelDesc} on provider '${invocation.providerId}'`;
+            }
+          } catch {
+            // fallback gracefully
+          }
+          errorMessage = `[Rate Limit] Specialist '${taskDef.assignedCube}'${resolvedDetails} reached provider quota limits. Consider switching to another provider in the header.`;
         }
 
         currentPlan = updateTaskStatus(currentPlan, taskDef.id, {
@@ -189,6 +217,8 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
       scope,
       abortSignal: abortController.signal,
       executor,
+      providerKey,
+      providerId,
     });
 
     currentPlan.synthesis = synthesisResult.markdown;
