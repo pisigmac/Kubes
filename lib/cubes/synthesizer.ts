@@ -34,6 +34,8 @@ export interface SwarmSynthesisResult {
 export interface SynthesizerOptions {
   scope?: ResourceScope | string;
   abortSignal?: AbortSignal;
+  providerKey?: string;
+  providerId?: string;
   executor?: (task: SwarmTask, prompt: string, signal: AbortSignal) => Promise<string>;
 }
 
@@ -316,7 +318,9 @@ export async function synthesizeSwarmPlan(
         synthesisText = await runCubeInstruction(
           maestro,
           prompt,
-          options.abortSignal || new AbortController().signal
+          options.abortSignal || new AbortController().signal,
+          options.providerKey,
+          options.providerId,
         );
       } else {
         return generateFallbackSynthesis(plan.rootObjective, plan.tasks, artifacts);

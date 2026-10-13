@@ -99,33 +99,10 @@ async function fetchModelsFromActiveProviders(): Promise<string[]> {
 }
 
 function fallbackModels(): string[] {
-  const curated = [
-    defaultModel(),
-    ...fallbackModelsList(),
-    "gemini-4-argon",
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "llama-4-70b-versatile",
-    "gpt-oss-120b",
-    "deepseek-r1-distill-llama-70b",
-    "llama-3.3-70b-versatile",
-    "anthropic/claude-sonnet-5.5",
-    "anthropic/claude-3.7-sonnet",
-    "deepseek/deepseek-v4.1-flash",
-    "deepseek/deepseek-r1",
-    "gpt-6-astra",
-    "gpt-6.1-sol",
-    "o3",
-    "o3-mini",
-    "grok-4.7",
-    "grok-4.3",
-    "grok-4",
-    "grok-3",
-  ];
-
-  return [...new Set(curated.filter(Boolean))];
+  const primary = defaultModel();
+  const providerModels = fallbackModelsList();
+  const combined = primary ? [primary, ...providerModels.filter((m) => m !== primary)] : providerModels;
+  return [...new Set(combined.filter(Boolean))];
 }
 
 function ensureSlash(base: string): string {

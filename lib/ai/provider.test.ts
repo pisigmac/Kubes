@@ -12,6 +12,9 @@ import {
   isRateLimitOrQuotaError,
   formatProviderErrorMessage,
   parseRetryAfterMs,
+  alignModelForProvider,
+  getLanguageModel,
+  fallbackModelsList,
 } from "./provider.ts";
 import { listModels, coerceModel } from "./models.ts";
 
@@ -228,4 +231,62 @@ test("Provider Resilience: createResilientFetch cancels immediately on abort sig
 
   await assert.rejects(promise, /User stopped|aborted/i);
 });
+
+test("Provider: alignModelForProvider maps unsupported models to provider defaultModel", () => {
+  const config = loadProvidersConfig();
+  const gemini = config.providers.find((p) => p.id === "gemini");
+  const groq = config.providers.find((p) => p.id === "groq");
+  const openrouter = config.providers.find((p) => p.id === "openrouter");
+
+  assert.ok(gemini);
+  assert.ok(groq);
+  assert.ok(openrouter);
+
+  // Gemini aligns foreign x-ai/grok-4.7 to defaultModel
+  assert.equal(alignModelForProvider("x-ai/grok-4.7", gemini), gemini.default_model);
+  // Gemini keeps valid gemini-3.8-flash
+  assert.equal(alignModelForProvider("gemini-3.8-flash", gemini), "gemini-3.8-flash");
+  // Gemini keeps valid gemini-4-argon
+  assert.equal(alignModelForProvider("gemini-4-argon", gemini), "gemini-4-argon");
+
+  // Groq aligns foreign model to llama default
+  assert.equal(alignModelForProvider("gemini-3.8-flash", groq), groq.default_model);
+  // Groq keeps llama-4
+  assert.equal(alignModelForProvider("llama-4-70b-versatile", groq), "llama-4-70b-versatile");
+
+  // OpenRouter preserves slash model ID
+  assert.equal(alignModelForProvider("x-ai/grok-4.7", openrouter), "x-ai/grok-4.7");
+});
+
+test("Provider: all fallback models originate strictly from config/providers.json", () => {
+  const config = loadProvidersConfig();
+  const models = fallbackModelsList();
+  assert.ok(Array.isArray(models));
+  assert.ok(models.length > 0);
+
+  // Every model in fallbackModelsList must be defined in providers.json
+  const allJsonModels = new Set<string>();
+  for (const p of config.providers) {
+    if (p.default_model) allJsonModels.add(p.default_model);
+    if (Array.isArray(p.models)) {
+      for (const m of p.models) allJsonModels.add(m);
+    }
+  }
+
+  for (const m of models) {
+    assert.ok(allJsonModels.has(m), `Model ${m} must be defined in config/providers.json`);
+  }
+});
+
+test("Provider: getLanguageModel creates model with proper provider and credentials", () => {
+  const model = getLanguageModel({
+    modelId: "llama-4-70b-versatile",
+    providerKey: "gsk_test_mock_token",
+    providerId: "groq",
+  });
+  assert.ok(model);
+  assert.equal(model.modelId, "llama-4-70b-versatile");
+  assert.equal(model.provider, "kubes-groq.chat");
+});
+
 

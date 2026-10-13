@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Kubes: Unified Universal Control CLI Hub
+# Single entrypoint for all platform lifecycle, diagnostics, and testing commands.
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="${ROOT_DIR}/scripts"
+
+show_help() {
+  cat <<'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪐 Kubes: Autonomous Agentic Workstation CLI Hub
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Usage: ./kubes <command> [options]
+
+Core Operational Commands:
+  start [--docker]       Start all platform services (local or Docker mode)
+  stop                   Gracefully shut down all local processes & Docker
+  restart [--docker]     Cleanly restart the entire stack
+  status                 Check real-time health dashboard & port allocations
+  doctor                 Run complete system diagnostic check
+  logs [-f] [-n <lines>] View or stream centralized logs (web, agent-core, etc.)
+
+Management & Verification:
+  seed                   Populate demo Cubes, tasks, and memory state
+  test                   Run all test suites with Node native test runner
+  lint                   Run ESLint static code analysis
+  build                  Compile production Next.js application
+  verify                 Run end-to-end verification gate
+
+Examples:
+  ./kubes start             # Starts local Python agent-core, Next.js, scheduler
+  ./kubes start --docker    # Starts stack via Docker Compose (with auto-fallback)
+  ./kubes stop              # Unified shutdown of Docker & local background jobs
+  ./kubes status            # Inspect TCP/HTTP health and active ports
+  ./kubes logs -f web       # Follow Next.js web application logs
+  ./kubes doctor            # Verify Node, uv, SQLite, Chrome, bwrap toolchains
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+}
+
+check_docker_daemon() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "⚠️  Docker is not installed on this system."
+    return 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "⚠️  Docker daemon is not running or accessible."
+    return 1
+  fi
+  return 0
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "${COMMAND}" in
+  start)
+    if [[ "${*:-}" == *"--docker"* ]]; then
+      if ! check_docker_daemon; then
+        echo "🔄 Self-healing: Falling back to local multi-process mode..."
+        exec "${SCRIPTS_DIR}/start_all.sh"
+      fi
+    fi
+    exec "${SCRIPTS_DIR}/start_all.sh" "$@"
+    ;;
+  stop)
+    exec "${SCRIPTS_DIR}/stop_all.sh" "$@"
+    ;;
+  restart)
+    if [[ "${*:-}" == *"--docker"* ]]; then
+      if ! check_docker_daemon; then
+        echo "🔄 Self-healing: Falling back to local multi-process mode..."
+        exec "${SCRIPTS_DIR}/restart_all.sh"
+      fi
+    fi
+    exec "${SCRIPTS_DIR}/restart_all.sh" "$@"
+    ;;
+  status)
+    exec "${SCRIPTS_DIR}/status.sh" "$@"
+    ;;
+  doctor)
+    exec "${SCRIPTS_DIR}/doctor.sh" "$@"
+    ;;
+  logs)
+    exec "${SCRIPTS_DIR}/logs.sh" "$@"
+    ;;
+  seed)
+    exec "${SCRIPTS_DIR}/seed_data.sh" "$@"
+    ;;
+  test)
+    exec pnpm test "$@"
+    ;;
+  lint)
+    exec pnpm lint "$@"
+    ;;
+  build)
+    exec pnpm build "$@"
+    ;;
+  verify)
+    exec "${SCRIPTS_DIR}/verify.sh" "$@"
+    ;;
+  help|-h|--help)
+    show_help
+    exit 0
+    ;;
+  *)
+    echo "❌ Unknown command: '${COMMAND}'"
+    echo ""
+    show_help
+    exit 1
+    ;;
+esac
