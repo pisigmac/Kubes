@@ -16,6 +16,11 @@ You chat with **Maestro**, the default coordinator, who delegates complex proble
 ## Key Features
 
 - **Maestro & Specialist Roster:** Maestro analyzes your goal and hands it off to the best specialist in a clean, one-hop delegation pattern. You can also chat directly with any specialist at any time.
+- **Multi-Agent Swarm Collaboration:** Maestro decomposes complex, multi-domain goals into parallel topological DAG stages with real-time SSE progress streaming and automated executive synthesis.
+- **Interactive Visual Artifact Studios & Live Canvas:**
+  - **Mermaid Studio:** Interactive pan/zoom canvas, layout orientation switch (`TD` ⬌ `LR`), and 1-click SVG / high-DPI PNG exports.
+  - **CSV Grid Studio:** Sortable tabular ledger with type-ahead search, column totals footer (`Σ Sum`, `Avg`), and dynamic SVG distribution bar charts.
+  - **Sandboxed Preview Runner:** Isolated `sandbox="allow-scripts"` iframe runner, multi-device viewport modes (Desktop, Tablet, Mobile), and an expandable live console log drawer.
 - **Live Web Search & Citations:** Pluggable real-time search engine (Tavily, Brave, xAI, DuckDuckGo) delivering up-to-the-minute information, market data, and documentation with clickable source citation badges.
 - **Shared Workspace Computer (`data/computer`):**
   - **Directory Isolation:** Each Cube has its own isolated filesystem sandbox (`data/computer/cubes/<slug>`). Maestro can read across all directories to oversee work, but writes remain strictly scoped to each Cube.
@@ -23,7 +28,7 @@ You chat with **Maestro**, the default coordinator, who delegates complex proble
   - **Headless Browser Navigation:** Built-in Puppeteer integration allows agents to open web pages, click elements, fill forms, and render live screenshots directly to the UI.
 - **Live Tune & Roster Management:** Modify instructions, pain points, names, or swap LLM models on the fly through the UI. Edits take effect immediately on the next message turn.
 - **In-App Cron Schedules:** Define recurring automated instructions using cron presets (hourly, daily, weekly) or custom 5-field cron expressions. Runs execute against the machine clock and write output to dedicated chat threads.
-- **Provider Agnostic:** Compatible with any OpenAI-compatible `/chat/completions` API endpoint, including xAI (Grok), OpenAI, OpenRouter, Groq, Ollama, and vLLM.
+- **Provider Agnostic & Resilient:** Compatible with any OpenAI-compatible API endpoint (OpenAI, Gemini, Groq, OpenRouter, xAI, Ollama, vLLM) with automated exponential jitter backoff on rate limits.
 
 
 ---

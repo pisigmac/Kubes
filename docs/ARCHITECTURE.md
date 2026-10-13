@@ -122,3 +122,56 @@ The comparative architectural analysis directly shaped the following core protec
 4. **Hybrid Semantic Memory Integration with Companion `kubemind`** (`lib/memory/kubemind.ts`):
    - Port 9090 hybrid dense/sparse vector embedding lookups blended with SQLite lexical search via Reciprocal Rank Fusion (RRF).
 
+---
+
+## Interactive Visual Artifact Studio & Live Canvas Engine
+
+The platform incorporates a visual artifact studio (`components/artifact-canvas.tsx`, `components/studios/`) that renders and executes agent deliverables:
+
+```mermaid
+flowchart TD
+    A["📄 Artifact File"] --> R{"Format?"}
+    
+    R -->|Mermaid| M["📊 Mermaid Studio
+    • Pan & zoom canvas
+    • TD ⬌ LR toggle
+    • SVG / PNG export"]
+    
+    R -->|CSV| C["📈 CSV Grid Studio
+    • Column sorting
+    • Totals & averages
+    • Distribution chart"]
+    
+    R -->|HTML| S["💻 Preview Sandbox
+    • Isolated iframe
+    • Console inspector
+    • Responsive viewports"]
+    
+    R -->|Markdown| D["📑 Markdown View
+    • Formatted document"]
+    
+    R -->|Source Code| B["📝 Code Block
+    • Syntax highlighting"]
+```
+
+### Studio Isolation & Rendering Specifications
+
+1. **Mermaid Studio (`components/studios/mermaid-studio.tsx`)**:
+   - Dynamic client-side dark theme Mermaid initialization.
+   - Smooth mouse drag pan with boundary clamping and wheel zoom (`0.2x` - `4.0x`).
+   - Dynamic orientation toggling (`cleanMermaidSource`, `toggleDiagramOrientation` in `lib/computer/diagram.ts`).
+   - 1-click **SVG Export** and high-DPI **PNG Export** on dark canvas (`#0c0c0e`).
+
+2. **CSV Grid Studio (`components/studios/csv-grid-studio.tsx`)**:
+   - RFC-4180 parsing with quotes and escaped quote handling (`lib/computer/csv_grid.ts`).
+   - Interactive table grid with client-side column sorting (`▲`/`▼`), real-time type-ahead search, and row count metrics.
+   - Column metrics calculations (`Σ Sum`, `Avg`) rendered in a sticky table footer.
+   - Native SVG bar distribution charts with category and metric column selectors, percentages, and gradients.
+
+3. **Live Sandboxed Preview Runner (`components/studios/preview-sandbox.tsx`)**:
+   - Strict `sandbox="allow-scripts"` iframe without `allow-same-origin`, preventing DOM/cookie/storage access to the host app.
+   - Injected console interceptor script (`lib/computer/sandbox_preview.ts`) capturing `console.log`, `info`, `warn`, `error`, and unhandled rejections via `window.parent.postMessage`.
+   - Collapsible console inspector drawer with level badges, message counter, and error indicators.
+   - Multi-device viewport toggling (100% Responsive, Desktop 1024px, Tablet 768px, Mobile 375px) with one-click reload.
+
+

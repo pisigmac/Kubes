@@ -20,10 +20,15 @@ bots/
 │   ├── layout.tsx                    # Root HTML layout & font configuration
 │   └── page.tsx                      # Primary Single-Page Application container
 ├── components/                       # React 19 Client Components
-│   ├── artifact-canvas.tsx           # Interactive Markdown / Mermaid / Code Canvas
+│   ├── studios/                      # Interactive Visual Artifact Studios
+│   │   ├── mermaid-studio.tsx        # Pan-and-zoom Mermaid canvas with SVG/PNG exports
+│   │   ├── csv-grid-studio.tsx       # Sortable tabular ledger & SVG distribution charts
+│   │   └── preview-sandbox.tsx       # Sandboxed iframe runner & console log drawer
+│   ├── artifact-canvas.tsx           # Interactive Studio Router & Unified Canvas
 │   ├── cube-editor.tsx               # Specialist Cube configuration modal
 │   ├── cubes-app.tsx                 # Core App view state & sidebar navigation
 │   ├── provider-modal.tsx            # AI Provider configuration & test dialog
+│   ├── swarm-dag.tsx                 # Live Topological Swarm DAG Visualizer
 │   └── transcript.tsx                # Real-time chat & tool execution stream
 ├── config/                           # Application Configurations
 │   ├── cubes.json                    # Declarative Per-Cube Tool & Network Policies
@@ -38,12 +43,12 @@ bots/
 ├── docs/                             # Engineering, Operational & GTM Documentation
 │   └── ops/                          # Operational runbooks & production guidelines
 ├── lib/                              # Core Platform Libraries & Subsystems
-│   ├── ai/                           # AI SDK providers, models, and fallback routing
+│   ├── ai/                           # AI SDK providers, models, backoff, and fallback routing
 │   ├── auth/                         # DeskID cryptographic JWT/JWKS verification & RBAC
-│   ├── computer/                     # Jail isolation, sandbox drivers (Bwrap, Docker, WASI), browser, egress proxy, safety
+│   ├── computer/                     # Jail isolation, sandbox drivers (Bwrap, Docker, WASI), browser, egress proxy, safety, diagram, csv_grid, sandbox_preview
 │   ├── cubes/                        # Cube store, thread persistence, policy engine, swarm DAG planner & runner, synthesizer, runtime orchestration
 │   ├── memory/                       # Keyword-scored memory store & companion kubemind hybrid vector retrieval
-│   └── db.ts                         # SQLite connection pool, schema migrations & seeding
+│   └── db.ts                         # SQLite connection pool, schema migrations & WAL checkpointing
 ├── scripts/                          # Standard Operational Scripts
 │   ├── start_all.sh                  # Starts all stack services with port allocation
 │   ├── stop_all.sh                   # Graceful process and container shutdown
