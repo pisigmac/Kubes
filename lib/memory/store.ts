@@ -1,6 +1,7 @@
 import { db } from "../db.ts";
 import { resolveScope } from "../cubes/store.ts";
 import type { ResourceScope } from "../auth/deskid.ts";
+import { indexMemoryInKubemind } from "./kubemind.ts";
 
 export type MemoryCategory = "preference" | "project" | "fact" | "instruction" | "general";
 
@@ -99,6 +100,8 @@ export function saveMemory(input: {
     )
     .run(memory);
 
+  indexMemoryInKubemind(memory);
+
   return memory;
 }
 
@@ -141,6 +144,59 @@ export function queryMemories(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map((item) => item.memory);
+}
+
+/**
+ * Hybrid Vector + Lexical Search with companion Kubemind (port 9090).
+ * Queries companion vector service and blends results with SQLite lexical search.
+ * Falls back to SQLite lexical search if Kubemind is offline.
+ */
+export async function queryMemoriesHybrid(
+  cubeSlug: string,
+  queryText: string,
+  limit = 5,
+  scope?: ResourceScope | string,
+): Promise<Memory[]> {
+  const lexicalResults = queryMemories(cubeSlug, queryText, limit * 2, scope);
+  const resolved = resolveScope(scope);
+
+  try {
+    const { queryKubemind } = await import("./kubemind.ts");
+    const vectorMatches = await queryKubemind(queryText, cubeSlug, limit, resolved.orgId);
+
+    if (!vectorMatches || vectorMatches.length === 0) {
+      return lexicalResults.slice(0, limit);
+    }
+
+    // Blend using Reciprocal Rank Fusion (RRF)
+    const scores = new Map<string, { memory: Memory; rrf: number }>();
+
+    lexicalResults.forEach((mem, rank) => {
+      scores.set(mem.id, { memory: mem, rrf: 1 / (60 + rank + 1) });
+    });
+
+    for (let rank = 0; rank < vectorMatches.length; rank++) {
+      const vMatch = vectorMatches[rank];
+      const existing = scores.get(vMatch.id);
+      const vScore = 1 / (60 + rank + 1);
+      if (existing) {
+        existing.rrf += vScore;
+      } else {
+        const mem = getMemory(vMatch.id, scope);
+        if (mem) {
+          scores.set(vMatch.id, { memory: mem, rrf: vScore });
+        }
+      }
+    }
+
+    return Array.from(scores.values())
+      .sort((a, b) => b.rrf - a.rrf)
+      .slice(0, limit)
+      .map((entry) => entry.memory);
+  } catch {
+    // If kubemind fails, return lexical results
+    return lexicalResults.slice(0, limit);
+  }
 }
 
 export function listMemories(cubeSlug?: string, scope?: ResourceScope | string): Memory[] {

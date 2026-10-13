@@ -76,3 +76,62 @@ test("exec stays in the Cube directory and the seat is exclusive", async () => {
   await withSeat("Write", async () => "ok");
   assert.equal(seatHolder(), null);
 });
+
+test("computerTools honors safeMode and approved lists", async () => {
+  const { computerTools } = await import("./tools.ts");
+
+  // Actor with safeMode: true and no approved commands or writes
+  const strictTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: true,
+    approvedCommands: [],
+    approvedWrites: [],
+  });
+
+  // Executing a non-whitelisted command without prior approval must require approval
+  const execTool = strictTools.computer_exec as { execute: (input: { command: string }) => Promise<Record<string, unknown>> };
+  const execBlocked = await execTool.execute({ command: "pnpm test" });
+  assert.equal(execBlocked.ok, false);
+  assert.equal(execBlocked.requiresApproval, true);
+  assert.equal(execBlocked.command, "pnpm test");
+
+  // Executing a whitelisted safe command ('pwd') auto-executes even in safeMode!
+  const execSafe = await execTool.execute({ command: "pwd" });
+  assert.equal(execSafe.requiresApproval, undefined);
+
+  // Writing a file without prior approval must require approval
+  const writeTool = strictTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const writeBlocked = await writeTool.execute({ path: "notes/draft.md", text: "hello" });
+  assert.equal(writeBlocked.ok, false);
+  assert.equal(writeBlocked.requiresApproval, true);
+  assert.equal(writeBlocked.path, "notes/draft.md");
+
+  // Actor with command and write approved
+  const approvedTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: true,
+    approvedCommands: ["echo approved"],
+    approvedWrites: ["notes/draft.md"],
+  });
+
+  // Write should now proceed
+  const approvedWriteTool = approvedTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const writeAllowed = await approvedWriteTool.execute({ path: "notes/draft.md", text: "hello" });
+  assert.equal(writeAllowed.ok, true);
+
+  // In safeMode: false, unapproved write proceeds directly
+  const autoTools = computerTools({
+    slug: "focus",
+    isMaestro: false,
+    name: "Focus",
+    safeMode: false,
+  });
+  const autoWriteTool = autoTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
+  const autoWriteAllowed = await autoWriteTool.execute({ path: "notes/auto.md", text: "auto" });
+  assert.equal(autoWriteAllowed.ok, true);
+});
+

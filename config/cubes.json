@@ -1,0 +1,102 @@
+{
+  "policies": {
+    "maestro": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "computer_exec",
+        "computer_browse",
+        "computer_click",
+        "computer_type",
+        "live_search",
+        "list_tasks",
+        "schedule_task",
+        "update_task",
+        "delete_task",
+        "list_cubes",
+        "create_cube",
+        "update_cube",
+        "handoff"
+      ],
+      "network_egress": "restricted",
+      "fs_access": "maestro_shared"
+    },
+    "focus": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "computer_exec",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "none",
+      "fs_access": "workspace_write"
+    },
+    "money": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "record_transaction",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "none",
+      "fs_access": "workspace_write"
+    },
+    "work": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "concept_diagram_create",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "none",
+      "fs_access": "workspace_write"
+    },
+    "job-hunt": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "track_application",
+        "computer_browse",
+        "computer_click",
+        "computer_type",
+        "live_search",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "restricted",
+      "fs_access": "workspace_write"
+    },
+    "learn": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "concept_diagram_create",
+        "live_search",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "restricted",
+      "fs_access": "workspace_write"
+    },
+    "_default": {
+      "allowed_tools": [
+        "computer_list",
+        "computer_read",
+        "computer_write",
+        "list_tasks",
+        "schedule_task"
+      ],
+      "network_egress": "none",
+      "fs_access": "workspace_write"
+    }
+  }
+}

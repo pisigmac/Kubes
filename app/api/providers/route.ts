@@ -3,6 +3,9 @@ import {
   gatewayInfo,
   PROVIDER_REGISTRY,
   type ProviderId,
+  getRuntimeActiveProvider,
+  setRuntimeActiveProvider,
+  setRuntimeProviderKey,
 } from "../../../lib/ai/provider.ts";
 import { assertRole, requireAuth } from "../../../lib/auth/deskid.ts";
 
@@ -14,9 +17,11 @@ export async function GET(request: Request) {
     assertRole(auth, "viewer");
     const providers = getProviderStatusList();
     const gateway = gatewayInfo();
+    const activeProvider = getRuntimeActiveProvider();
     return Response.json({
       providers,
       gateway,
+      activeProvider,
     });
   } catch (error) {
     const status = (error as { status?: number }).status || 500;
@@ -30,11 +35,28 @@ export async function POST(request: Request) {
     const auth = await requireAuth(request);
     assertRole(auth, "editor");
     const body = (await request.json()) as {
-      action?: "test";
+      action?: "test" | "activate";
       providerId?: ProviderId;
       apiKey?: string;
       baseURL?: string;
     };
+
+    if (body.action === "activate") {
+      const provider = PROVIDER_REGISTRY.find((p) => p.id === body.providerId);
+      if (!provider) {
+        return Response.json({ ok: false, error: "Unknown provider" }, { status: 400 });
+      }
+      if (body.apiKey?.trim()) {
+        setRuntimeProviderKey(provider.id, body.apiKey.trim());
+      }
+      setRuntimeActiveProvider(provider.id);
+      return Response.json({
+        ok: true,
+        activeProvider: provider.id,
+        defaultModel: provider.defaultModel,
+        message: `Activated ${provider.name} as active runtime provider.`,
+      });
+    }
 
     if (body.action === "test") {
       const provider = PROVIDER_REGISTRY.find((p) => p.id === body.providerId);

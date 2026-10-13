@@ -67,7 +67,12 @@ async function fetchModelsFromActiveProviders(): Promise<string[]> {
       if (!response.ok) return [];
       const body = (await response.json()) as { data?: { id?: string }[] };
       return (body.data ?? [])
-        .map((m) => m.id?.trim() ?? "")
+        .flatMap((m) => {
+          const raw = m.id?.trim() ?? "";
+          if (!raw) return [];
+          const clean = raw.startsWith("models/") ? raw.slice(7) : raw;
+          return clean !== raw ? [raw, clean] : [raw];
+        })
         .filter((id) => /^[\w./:-]+$/.test(id));
     } catch {
       return [];
@@ -97,19 +102,25 @@ function fallbackModels(): string[] {
   const curated = [
     defaultModel(),
     ...fallbackModelsList(),
+    "gemini-4-argon",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-2.5-flash-thinking",
-    "gemini-2.0-flash",
+    "llama-4-70b-versatile",
+    "gpt-oss-120b",
     "deepseek-r1-distill-llama-70b",
     "llama-3.3-70b-versatile",
-    "qwen-qwq-32b",
+    "anthropic/claude-sonnet-5.5",
     "anthropic/claude-3.7-sonnet",
+    "deepseek/deepseek-v4.1-flash",
     "deepseek/deepseek-r1",
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "o3",
     "o3-mini",
-    "o1",
-    "gpt-4o",
     "grok-4.7",
+    "grok-4.3",
     "grok-4",
     "grok-3",
   ];

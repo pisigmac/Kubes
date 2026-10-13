@@ -32,11 +32,15 @@ export function Transcript({
   cubes,
   activeName,
   onViewArtifact,
+  onApproveAction,
+  onDenyAction,
 }: {
   messages: UIMessage[];
   cubes: Cube[];
   activeName: string;
   onViewArtifact?: (artifact: { name: string; path: string; content: string }) => void;
+  onApproveAction?: (action: { type: "exec" | "write"; target: string }) => void;
+  onDenyAction?: (action: { type: "exec" | "write"; target: string }) => void;
 }) {
   if (messages.length === 0) {
     return (
@@ -63,6 +67,8 @@ export function Transcript({
           cubes={cubes}
           activeName={activeName}
           onViewArtifact={onViewArtifact}
+          onApproveAction={onApproveAction}
+          onDenyAction={onDenyAction}
         />
       ))}
     </div>
@@ -74,11 +80,15 @@ function Message({
   cubes,
   activeName,
   onViewArtifact,
+  onApproveAction,
+  onDenyAction,
 }: {
   message: UIMessage;
   cubes: Cube[];
   activeName: string;
   onViewArtifact?: (artifact: { name: string; path: string; content: string }) => void;
+  onApproveAction?: (action: { type: "exec" | "write"; target: string }) => void;
+  onDenyAction?: (action: { type: "exec" | "write"; target: string }) => void;
 }) {
   if (message.role === "user") {
     const text = message.parts
@@ -128,31 +138,75 @@ function Message({
           return <MutationPart key={key} name={name} part={part} />;
         }
 
-        if (name === "computer_write" && part.state === "output-available" && isRecord(part.input)) {
-          const input = part.input as { path?: string; text?: string };
-          const filePath = input.path || "file";
+        if (name === "computer_write") {
+          const output = part.state === "output-available" && isRecord(part.output) ? part.output : undefined;
+          const input = isRecord(part.input) ? (part.input as { path?: string; text?: string }) : undefined;
+          const filePath = (typeof output?.path === "string" ? output.path : input?.path) || "file";
           const fileName = filePath.split("/").pop() || filePath;
-          return (
-            <div key={key} className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onViewArtifact && input.text !== undefined) {
-                    onViewArtifact({
-                      name: fileName,
-                      path: filePath,
-                      content: input.text,
-                    });
-                  }
-                }}
-                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/80 transition-colors hover:border-[#e7ff3a]/40 hover:bg-white/[0.06] hover:text-white"
+          const fileContent = typeof output?.text === "string" ? output.text : input?.text;
+          const requiresApproval = Boolean(output?.requiresApproval);
+
+          if (requiresApproval) {
+            return (
+              <div
+                key={key}
+                className="my-1.5 flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-950/20 p-3.5 text-xs shadow-lg"
               >
-                <span className="inline-block h-2 w-2 rounded-full bg-[#e7ff3a]" />
-                <span>Created <strong>{fileName}</strong></span>
-                <span className="text-white/40">· Click to view artifact</span>
-              </button>
-            </div>
-          );
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-medium text-amber-300">
+                    <span>🛡️</span>
+                    <span>File Write Approval Required</span>
+                  </div>
+                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] text-amber-200">
+                    File Mutation
+                  </span>
+                </div>
+                <p className="text-white/70">
+                  {activeName} wants to write file: <code className="text-amber-200 font-mono">{filePath}</code>
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onApproveAction?.({ type: "write", target: filePath })}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-3 py-1.5 font-medium text-emerald-300 hover:bg-emerald-500/30 transition"
+                  >
+                    <span>✓</span> Approve & Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDenyAction?.({ type: "write", target: filePath })}
+                    className="flex items-center gap-1.5 rounded-lg bg-white/5 border border-white/15 px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white transition"
+                  >
+                    <span>✕</span> Deny
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          if (part.state === "output-available") {
+            return (
+              <div key={key} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onViewArtifact && fileContent !== undefined) {
+                      onViewArtifact({
+                        name: fileName,
+                        path: filePath,
+                        content: fileContent,
+                      });
+                    }
+                  }}
+                  className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/80 transition-colors hover:border-[#e7ff3a]/40 hover:bg-white/[0.06] hover:text-white"
+                >
+                  <span className="inline-block h-2 w-2 rounded-full bg-[#e7ff3a]" />
+                  <span>Created <strong>{fileName}</strong></span>
+                  <span className="text-white/40">· Click to view artifact</span>
+                </button>
+              </div>
+            );
+          }
         }
 
         if (name === "schedule_task" || name === "update_task") {
@@ -213,6 +267,99 @@ function Message({
               {part.state === "output-error" ? part.errorText : "Removed scheduled task."}
             </p>
           );
+        }
+
+        if (name === "computer_exec") {
+          const output = part.state === "output-available" && isRecord(part.output) ? part.output : undefined;
+          const input = isRecord(part.input) ? (part.input as { command?: string }) : undefined;
+          const command = (typeof output?.command === "string" ? output.command : input?.command) || "";
+          const requiresApproval = Boolean(output?.requiresApproval);
+
+          if (requiresApproval) {
+            return (
+              <div
+                key={key}
+                className="my-1.5 flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-950/20 p-3.5 text-xs shadow-lg"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-medium text-amber-300">
+                    <span>🛡️</span>
+                    <span>Action Approval Required</span>
+                  </div>
+                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] text-amber-200">
+                    Terminal Command
+                  </span>
+                </div>
+                <p className="text-white/70">
+                  {activeName} wants to run this command on the shared computer:
+                </p>
+                <div className="rounded-lg border border-white/10 bg-black/60 p-2 font-mono text-[11px] text-amber-100 overflow-x-auto">
+                  <code>$ {command}</code>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onApproveAction?.({ type: "exec", target: command })}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-3 py-1.5 font-medium text-emerald-300 hover:bg-emerald-500/30 transition"
+                  >
+                    <span>✓</span> Approve & Run
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetch("/api/safe-commands", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ command }),
+                      }).catch(() => {});
+                      onApproveAction?.({ type: "exec", target: command });
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1.5 text-xs text-emerald-300/80 hover:bg-emerald-500/20 hover:text-emerald-200 transition"
+                    title="Persist this command so you are never prompted for it again"
+                  >
+                    <span>⚡</span> Always Allow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDenyAction?.({ type: "exec", target: command })}
+                    className="flex items-center gap-1.5 rounded-lg bg-white/5 border border-white/15 px-3 py-1.5 text-white/70 hover:bg-white/10 hover:text-white transition"
+                  >
+                    <span>✕</span> Deny
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          if (part.state === "output-available" && output) {
+            const exitCode = typeof output.exitCode === "number" ? output.exitCode : 0;
+            const stdout = typeof output.stdout === "string" ? output.stdout.trim() : "";
+            const stderr = typeof output.stderr === "string" ? output.stderr.trim() : "";
+            return (
+              <div key={key} className="my-1 rounded-xl border border-white/10 bg-black/30 p-3 text-xs">
+                <div className="flex items-center justify-between font-mono text-[11px] text-white/60">
+                  <div className="flex items-center gap-2 truncate max-w-md">
+                    <span className="text-[#e7ff3a]">⚡</span>
+                    <span className="truncate">$ {command}</span>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] ${
+                      exitCode === 0
+                        ? "bg-emerald-500/20 text-emerald-300"
+                        : "bg-red-500/20 text-red-300"
+                    }`}
+                  >
+                    exit {exitCode}
+                  </span>
+                </div>
+                {stdout || stderr ? (
+                  <pre className="mt-2 max-h-36 overflow-y-auto rounded-lg bg-black/50 p-2 font-mono text-[11px] text-white/70 whitespace-pre-wrap">
+                    {stdout || stderr}
+                  </pre>
+                ) : null}
+              </div>
+            );
+          }
         }
 
         if (name.startsWith("computer_")) {

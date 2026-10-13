@@ -89,7 +89,17 @@ export function CubeEditor({
   }
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col overflow-x-hidden border-white/10 bg-[#101012] lg:w-[340px] lg:max-w-[340px] lg:border-l">
+    <aside
+      role="region"
+      aria-label="Cube Editor"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+      className="flex h-full w-full min-w-0 flex-col overflow-x-hidden border-white/10 bg-[#101012] lg:w-[340px] lg:max-w-[340px] lg:border-l"
+    >
       <div className="flex items-center justify-between px-4 py-4">
         <div>
           <p className="text-xs tracking-[0.16em] text-white/40 uppercase">
@@ -101,6 +111,7 @@ export function CubeEditor({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Cancel creating Cube"
             className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:bg-white/10 hover:text-white transition"
           >
             Cancel
@@ -109,6 +120,7 @@ export function CubeEditor({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close Cube editor"
             className="rounded-full px-2 py-1 text-sm text-white/60 hover:bg-white/5 hover:text-white lg:hidden"
           >
             Close

@@ -258,11 +258,15 @@ async function runBash(
   command: string,
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
   const driver = getSandboxDriver();
+  const { getCubePolicy } = await import("../cubes/policy.ts");
+  const policy = getCubePolicy(slug);
+
   const result = await driver.execute({
     root,
     slug,
     command,
     timeoutMs: EXEC_MS,
+    networkEgress: policy.network_egress,
   });
   rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
   return result;

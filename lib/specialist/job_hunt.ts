@@ -62,7 +62,30 @@ export function getApplications(cubeSlug = "job-hunt"): JobApplication[] {
   }
 }
 
-export function recordApplication(app: JobApplication, cubeSlug = "job-hunt"): JobApplication[] {
+export interface RecordApplicationResult {
+  applications: JobApplication[];
+  isDuplicate: boolean;
+  updated: boolean;
+  preview: {
+    role: string;
+    company: string;
+    status: ApplicationStatus;
+    action: "created" | "updated" | "duplicate_detected";
+  };
+}
+
+export function checkApplicationDuplicate(app: JobApplication, existing: JobApplication[]): { isDuplicate: boolean; index: number } {
+  const idx = existing.findIndex(
+    (a) => a.company.toLowerCase() === app.company.toLowerCase() && a.role.toLowerCase() === app.role.toLowerCase(),
+  );
+  return { isDuplicate: idx >= 0, index: idx };
+}
+
+export function recordApplication(
+  app: JobApplication,
+  cubeSlug = "job-hunt",
+  options?: { confirmDuplicate?: boolean },
+): RecordApplicationResult {
   const root = ensureWorkspace(cubeSlug, false);
   const targetFile = "notes/applications.md";
   let existing: JobApplication[] = [];
@@ -73,18 +96,54 @@ export function recordApplication(app: JobApplication, cubeSlug = "job-hunt"): J
     existing = [];
   }
 
-  // Update existing if company + role matches, else prepend
-  const idx = existing.findIndex(
-    (a) => a.company.toLowerCase() === app.company.toLowerCase() && a.role.toLowerCase() === app.role.toLowerCase(),
-  );
+  const { isDuplicate, index } = checkApplicationDuplicate(app, existing);
 
-  if (idx >= 0) {
-    existing[idx] = { ...existing[idx], ...app };
-  } else {
-    existing.unshift(app);
+  if (isDuplicate) {
+    // If exact same status and step, flag as duplicate unless confirmed
+    const prev = existing[index];
+    const isExact = prev.status === app.status && prev.nextStep === app.nextStep && prev.link === app.link;
+    if (isExact && !options?.confirmDuplicate) {
+      return {
+        applications: existing,
+        isDuplicate: true,
+        updated: false,
+        preview: {
+          role: app.role,
+          company: app.company,
+          status: app.status,
+          action: "duplicate_detected",
+        },
+      };
+    }
+
+    existing[index] = { ...existing[index], ...app };
+    const updatedMarkdown = formatApplicationsMarkdown(existing);
+    writeText(root, targetFile, updatedMarkdown);
+    return {
+      applications: existing,
+      isDuplicate: true,
+      updated: true,
+      preview: {
+        role: app.role,
+        company: app.company,
+        status: app.status,
+        action: "updated",
+      },
+    };
   }
 
+  existing.unshift(app);
   const updatedMarkdown = formatApplicationsMarkdown(existing);
   writeText(root, targetFile, updatedMarkdown);
-  return existing;
+  return {
+    applications: existing,
+    isDuplicate: false,
+    updated: false,
+    preview: {
+      role: app.role,
+      company: app.company,
+      status: app.status,
+      action: "created",
+    },
+  };
 }

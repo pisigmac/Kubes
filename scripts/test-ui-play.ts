@@ -8,16 +8,48 @@
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 
-const CHROME_PATH = process.env.CUBES_CHROME || "/usr/bin/google-chrome";
+function findChromeBinary(): string {
+  if (process.env.CUBES_CHROME && fs.existsSync(process.env.CUBES_CHROME)) {
+    return process.env.CUBES_CHROME;
+  }
+  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) {
+    return process.env.CHROME_BIN;
+  }
+  const standardPaths = [
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+  ];
+  for (const p of standardPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return "/usr/bin/google-chrome";
+}
+
+const CHROME_PATH = findChromeBinary();
 
 async function findActiveWebPort(): Promise<number> {
+  const pidPortFile = "data/../.pids/web.port";
+  let pidPort: number | null = null;
+  try {
+    if (fs.existsSync(pidPortFile)) {
+      const raw = fs.readFileSync(pidPortFile, "utf-8").trim();
+      const parsed = parseInt(raw, 10);
+      if (!isNaN(parsed) && parsed > 0) pidPort = parsed;
+    }
+  } catch {}
+
   const candidates = [
+    pidPort,
     parseInt(process.env.PORT || "", 10),
+    3000,
     3001,
     3002,
     3003,
-    3000,
-  ].filter((p): p is number => !isNaN(p) && p > 0);
+    3004,
+  ].filter((p): p is number => p !== null && !isNaN(p) && p > 0);
 
   for (const p of candidates) {
     try {
@@ -32,7 +64,7 @@ async function findActiveWebPort(): Promise<number> {
       // try next candidate
     }
   }
-  return 3001;
+  return pidPort || 3000;
 }
 
 async function main() {
@@ -264,6 +296,70 @@ async function main() {
     });
     if (!textareaExists) throw new Error("Chat input textarea not found");
     console.log("✅ OK (Chat input ready)");
+
+    // 8. Testing Agent Swarm Controls & Mode Toggle
+    process.stdout.write("8. Testing Agent Swarm Controls (⚡ Swarm Mode Toggle, Submit States)... ");
+    
+    // Switch back to Maestro to verify Swarm controls
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("nav button"));
+      const maestroBtn = buttons.find((b) => b.textContent?.includes("Maestro"));
+      (maestroBtn as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Verify Swarm toggle button exists
+    const swarmBtnExists = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("form button"));
+      return buttons.some((b) => b.textContent?.includes("Swarm") || b.textContent?.includes("Single"));
+    });
+    if (!swarmBtnExists) {
+      throw new Error("Swarm mode toggle button not found in chat controls");
+    }
+
+    // Verify initial button state is 'Run Swarm' for Maestro
+    let submitBtnText = await page.evaluate(() => {
+      const submitBtn = document.querySelector("form button[type='submit']");
+      return submitBtn?.textContent?.trim() || "";
+    });
+    if (submitBtnText !== "Run Swarm") {
+      throw new Error(`Expected submit button text 'Run Swarm', got '${submitBtnText}'`);
+    }
+
+    // Click toggle to switch to Single Agent mode
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("form button"));
+      const toggle = buttons.find((b) => b.getAttribute("type") === "button" && b.textContent?.includes("⚡"));
+      (toggle as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Verify submit button changed to 'Send'
+    submitBtnText = await page.evaluate(() => {
+      const submitBtn = document.querySelector("form button[type='submit']");
+      return submitBtn?.textContent?.trim() || "";
+    });
+    if (submitBtnText !== "Send") {
+      throw new Error(`Expected submit button text 'Send' after toggle, got '${submitBtnText}'`);
+    }
+
+    // Click toggle to switch back to Swarm mode
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll("form button"));
+      const toggle = buttons.find((b) => b.getAttribute("type") === "button" && b.textContent?.includes("⚡"));
+      (toggle as HTMLElement)?.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Verify submit button restored to 'Run Swarm'
+    submitBtnText = await page.evaluate(() => {
+      const submitBtn = document.querySelector("form button[type='submit']");
+      return submitBtn?.textContent?.trim() || "";
+    });
+    if (submitBtnText !== "Run Swarm") {
+      throw new Error(`Expected submit button text 'Run Swarm' after toggling back, got '${submitBtnText}'`);
+    }
+    console.log("✅ OK (⚡ Swarm toggle, dynamic button labels, and mode state verified)");
 
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("🎉 All E2E UI Interaction Tests Passed Successfully!");

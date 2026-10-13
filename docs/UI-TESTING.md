@@ -116,6 +116,13 @@ The automated playbook executes 8 critical user journeys in sequence:
   - Textarea is present, enabled, and accepts user input.
   - Send button triggers streaming response mechanics without UI freeze.
 
+### Phase 8: Agent Swarm Controls & Mode Toggle
+- **Action**: Inspects the `⚡ Swarm` mode toggle button and submit action in Maestro.
+- **Assertions**:
+  - `⚡ Swarm` toggle button is present in chat controls.
+  - Submit button dynamically displays `"Run Swarm"` in Swarm mode and switches to `"Send"` when toggled to Single mode.
+  - Toggling mode updates styling and state seamlessly without reloading the thread.
+
 ---
 
 ## 4. Manual QA Test Matrix for Functional Verification

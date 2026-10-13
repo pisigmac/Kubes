@@ -76,7 +76,7 @@ export function CubesApp({
   const reloadCubes = useCallback(async () => {
     const response = await fetch("/api/cubes");
     const body = (await response.json()) as { cubes?: Cube[]; error?: string };
-    if (!response.ok || !body.cubes) throw new Error(body.error || "Could not load Cubes.");
+    if (!response.ok || !body.cubes) throw new Error(body.error || "Could not load Kubes.");
     setCubes(body.cubes);
   }, []);
 
@@ -151,7 +151,7 @@ export function CubesApp({
         {navOpen ? (
           <button
             type="button"
-            aria-label="Close Cubes"
+            aria-label="Close Kubes"
             className="absolute inset-0 bg-black/60 md:hidden"
             onClick={() => setNavOpen(false)}
           />
@@ -294,7 +294,7 @@ export function CubesApp({
             initialMessages={chat.messages}
             onCubesChanged={() => {
               void reloadCubes().catch((caught: unknown) => {
-                setError(caught instanceof Error ? caught.message : "Could not refresh Cubes.");
+                setError(caught instanceof Error ? caught.message : "Could not refresh Kubes.");
               });
             }}
             onComputer={(slug) => void showComputer(slug)}

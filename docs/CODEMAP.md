@@ -14,6 +14,7 @@ bots/
 │   │   ├── models/                   # Live AI model listing
 │   │   ├── providers/                # Provider diagnostics & connection tests
 │   │   ├── schedules/                # Scheduled autonomous background tasks
+│   │   ├── swarm/                    # Autonomous multi-agent swarm delegation & SSE streaming
 │   │   └── threads/                  # Conversation threads & message history
 │   ├── globals.css                   # Global Tailwind CSS styles
 │   ├── layout.tsx                    # Root HTML layout & font configuration
@@ -25,7 +26,10 @@ bots/
 │   ├── provider-modal.tsx            # AI Provider configuration & test dialog
 │   └── transcript.tsx                # Real-time chat & tool execution stream
 ├── config/                           # Application Configurations
-│   └── digest.json                   # Digest notification channel preferences
+│   ├── cubes.json                    # Declarative Per-Cube Tool & Network Policies
+│   ├── digest.json                   # Digest notification channel preferences
+│   ├── safe_commands.json            # Safe Mode whitelisted commands & prefixes
+│   └── security.json                 # Egress proxy token patterns & redaction rules
 ├── data/                             # Persistent Storage (SQLite, Logs, Workspaces)
 │   ├── computer/orgs/<orgId>/        # Tenant-isolated filesystems & browser profiles
 │   ├── digests/                      # Daily executive digest markdown archives
@@ -36,9 +40,9 @@ bots/
 ├── lib/                              # Core Platform Libraries & Subsystems
 │   ├── ai/                           # AI SDK providers, models, and fallback routing
 │   ├── auth/                         # DeskID cryptographic JWT/JWKS verification & RBAC
-│   ├── computer/                     # Jail isolation, sandbox drivers, browser, cron, digests
-│   ├── cubes/                        # Cube store, thread persistence, runtime orchestration
-│   ├── memory/                       # Keyword-scored memory store & retrieval
+│   ├── computer/                     # Jail isolation, sandbox drivers (Bwrap, Docker, WASI), browser, egress proxy, safety
+│   ├── cubes/                        # Cube store, thread persistence, policy engine, swarm DAG planner & runner, synthesizer, runtime orchestration
+│   ├── memory/                       # Keyword-scored memory store & companion kubemind hybrid vector retrieval
 │   └── db.ts                         # SQLite connection pool, schema migrations & seeding
 ├── scripts/                          # Standard Operational Scripts
 │   ├── start_all.sh                  # Starts all stack services with port allocation

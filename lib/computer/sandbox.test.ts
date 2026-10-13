@@ -69,3 +69,43 @@ test("BwrapDriver provides Linux namespace isolation when available", async () =
     writeRootResult.stderr.includes("Permission denied"),
   );
 });
+
+test("WasmShellDriver executes safe POSIX commands in workspace isolate", async () => {
+  const { WasmShellDriver } = await import("./wasi_shell.ts");
+  const wasm = new WasmShellDriver();
+  assert.equal(wasm.isAvailable(), true);
+
+  const testFile = path.join(tempDir, "wasm_test.txt");
+  fs.writeFileSync(testFile, "wasm isolate content");
+
+  // Read file via cat
+  const catRes = await wasm.execute({
+    root: tempDir,
+    slug: "wasm-slug",
+    command: "cat wasm_test.txt",
+    timeoutMs: 5000,
+  });
+  assert.equal(catRes.exitCode, 0);
+  assert.equal(catRes.stdout, "wasm isolate content");
+  assert.equal(catRes.driver, "wasm");
+
+  // Echo command
+  const echoRes = await wasm.execute({
+    root: tempDir,
+    slug: "wasm-slug",
+    command: "echo 'hello from wasm'",
+    timeoutMs: 5000,
+  });
+  assert.equal(echoRes.exitCode, 0);
+  assert.equal(echoRes.stdout.trim(), "hello from wasm");
+
+  // Path traversal outside workspace root must fail
+  const escapeRes = await wasm.execute({
+    root: tempDir,
+    slug: "wasm-slug",
+    command: "cat ../../../../etc/passwd",
+    timeoutMs: 5000,
+  });
+  assert.equal(escapeRes.exitCode, 1);
+  assert.ok(escapeRes.stderr.includes("traversal"));
+});

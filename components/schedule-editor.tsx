@@ -66,7 +66,7 @@ export function ScheduleEditor({
   return (
     <div className="flex flex-col gap-2 border-t border-white/10 pt-3">
       <p className="text-xs tracking-[0.16em] text-white/40 uppercase">Schedules</p>
-      <p className="text-xs text-white/40">Runs only while Cubes is open. Times use this computer&apos;s clock.</p>
+      <p className="text-xs text-white/40">Runs only while Kubes is open. Times use this computer&apos;s clock.</p>
       {schedules.map((schedule) => (
         <div key={schedule.id} className="rounded-xl border border-white/10 px-3 py-2">
           <p className="text-sm">{cronLabel(schedule.cron)}</p>

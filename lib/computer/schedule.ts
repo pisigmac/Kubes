@@ -8,6 +8,8 @@ import type { ResourceScope } from "../auth/deskid.ts";
 import { generateDigestSummary, dispatchDigest } from "./digest.ts";
 
 
+export type CatchupPolicy = "run_missed" | "skip_missed";
+
 export type Schedule = {
   id: string;
   cubeId: string;
@@ -16,6 +18,8 @@ export type Schedule = {
   enabled: boolean;
   orgId: string;
   userId: string | null;
+  timezone: string;
+  catchupPolicy: CatchupPolicy;
   lastRunAt: string | null;
   nextRunAt: string;
   lastStatus: string | null;
@@ -31,6 +35,8 @@ type ScheduleRow = {
   enabled: number;
   org_id: string;
   user_id: string | null;
+  timezone: string;
+  catchup_policy: string;
   last_run_at: string | null;
   next_run_at: string;
   last_status: string | null;
@@ -49,6 +55,8 @@ function mapSchedule(row: ScheduleRow): Schedule {
     enabled: row.enabled === 1,
     orgId: row.org_id || "default",
     userId: row.user_id,
+    timezone: row.timezone || "UTC",
+    catchupPolicy: (row.catchup_policy as CatchupPolicy) || "skip_missed",
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
     lastStatus: row.last_status,
@@ -69,6 +77,8 @@ export function createSchedule(input: {
   cubeId: string;
   cron: string;
   instruction: string;
+  timezone?: string;
+  catchupPolicy?: CatchupPolicy;
   orgId?: string;
   userId?: string | null;
   scope?: ResourceScope | string;
@@ -78,7 +88,9 @@ export function createSchedule(input: {
   const userId = input.userId ?? resolved.userId;
   if (!getCube(input.cubeId, resolved)) throw new Error("Cube not found.");
   const cron = input.cron.trim();
-  parseCron(cron);
+  const timezone = input.timezone?.trim() || "UTC";
+  const catchupPolicy = input.catchupPolicy || "skip_missed";
+  parseCron(cron, timezone);
   const instruction = input.instruction.trim();
   if (!instruction) throw new Error("Instruction is required.");
   if (instruction.length > 4000) throw new Error("Instruction is too long.");
@@ -91,8 +103,10 @@ export function createSchedule(input: {
     enabled: 1,
     org_id: orgId,
     user_id: userId || null,
+    timezone,
+    catchup_policy: catchupPolicy,
     last_run_at: null,
-    next_run_at: nextCron(cron, now).toISOString(),
+    next_run_at: nextCron(cron, now, timezone).toISOString(),
     last_status: null,
     last_error: null,
     thread_id: null,
@@ -100,9 +114,9 @@ export function createSchedule(input: {
   db()
     .prepare(
       `INSERT INTO schedules (
-        id, cube_id, cron, instruction, enabled, org_id, user_id, last_run_at, next_run_at, last_status, last_error, thread_id, created_at, updated_at
+        id, cube_id, cron, instruction, enabled, org_id, user_id, timezone, catchup_policy, last_run_at, next_run_at, last_status, last_error, thread_id, created_at, updated_at
       ) VALUES (
-        @id, @cube_id, @cron, @instruction, @enabled, @org_id, @user_id, NULL, @next_run_at, NULL, NULL, NULL, @created_at, @updated_at
+        @id, @cube_id, @cron, @instruction, @enabled, @org_id, @user_id, @timezone, @catchup_policy, NULL, @next_run_at, NULL, NULL, NULL, @created_at, @updated_at
       )`,
     )
     .run({ ...row, created_at: now.toISOString(), updated_at: now.toISOString() });
@@ -111,34 +125,49 @@ export function createSchedule(input: {
 
 export function updateSchedule(
   id: string,
-  patch: { cron?: string; instruction?: string; enabled?: boolean; scope?: ResourceScope | string },
+  patch: {
+    cron?: string;
+    instruction?: string;
+    enabled?: boolean;
+    timezone?: string;
+    catchupPolicy?: CatchupPolicy;
+    scope?: ResourceScope | string;
+  },
   scope?: ResourceScope | string,
 ): Schedule {
   const resolved = resolveScope(patch.scope || scope);
   const current = db().prepare("SELECT * FROM schedules WHERE id = ? AND org_id = ?").get(id, resolved.orgId) as ScheduleRow | undefined;
   if (!current) throw new Error("Schedule not found.");
   const cron = patch.cron === undefined ? current.cron : patch.cron.trim();
-  parseCron(cron);
+  const timezone = patch.timezone === undefined ? (current.timezone || "UTC") : patch.timezone.trim();
+  const catchupPolicy = patch.catchupPolicy === undefined ? (current.catchup_policy as CatchupPolicy || "skip_missed") : patch.catchupPolicy;
+  parseCron(cron, timezone);
   const instruction = patch.instruction === undefined ? current.instruction : patch.instruction.trim();
   if (!instruction) throw new Error("Instruction is required.");
   if (instruction.length > 4000) throw new Error("Instruction is too long.");
   const enabled = patch.enabled === undefined ? current.enabled : patch.enabled ? 1 : 0;
-  const next = nextCron(cron, new Date()).toISOString();
+  const next = nextCron(cron, new Date(), timezone).toISOString();
   const updated = new Date().toISOString();
   db()
     .prepare(
       `UPDATE schedules
-       SET cron = ?, instruction = ?, enabled = ?, next_run_at = ?, updated_at = ?
+       SET cron = ?, instruction = ?, enabled = ?, timezone = ?, catchup_policy = ?, next_run_at = ?, updated_at = ?
        WHERE id = ? AND org_id = ?`,
     )
-    .run(cron, instruction, enabled, next, updated, id, resolved.orgId);
+    .run(cron, instruction, enabled, timezone, catchupPolicy, next, updated, id, resolved.orgId);
   return mapSchedule({
     ...current,
     cron,
     instruction,
     enabled,
+    timezone,
+    catchup_policy: catchupPolicy,
     next_run_at: next,
   });
+}
+
+export function toggleSchedule(id: string, enabled: boolean, scope?: ResourceScope | string): Schedule {
+  return updateSchedule(id, { enabled, scope }, scope);
 }
 
 export function deleteSchedule(id: string, scope?: ResourceScope | string): void {
@@ -166,18 +195,39 @@ export function stopScheduler(): void {
   }
 }
 
+const MISSED_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes offline gap
+
 export async function tick(now = new Date()): Promise<void> {
   const due = db()
     .prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at <= ? ORDER BY next_run_at ASC")
     .all(now.toISOString()) as ScheduleRow[];
   for (const row of due) {
     if (isCubeBusy(row.cube_id)) continue;
+
+    const scheduledTime = new Date(row.next_run_at).getTime();
+    const gapMs = now.getTime() - scheduledTime;
+    const tz = row.timezone || "UTC";
+    const policy = (row.catchup_policy as CatchupPolicy) || "skip_missed";
+
+    // If task was missed due to sleep/restart beyond threshold
+    if (gapMs > MISSED_THRESHOLD_MS && policy === "skip_missed") {
+      const following = nextCron(row.cron, now, tz).toISOString();
+      db()
+        .prepare(
+          `UPDATE schedules
+           SET next_run_at = ?, last_status = 'skipped_missed', updated_at = ?
+           WHERE id = ? AND next_run_at = ?`,
+        )
+        .run(following, now.toISOString(), row.id, row.next_run_at);
+      continue;
+    }
+
     if (!claimRow(db(), row, now)) continue;
-    await runClaimed(row);
+    await runClaimed(row, gapMs > MISSED_THRESHOLD_MS);
   }
 }
 
-async function runClaimed(row: ScheduleRow): Promise<void> {
+async function runClaimed(row: ScheduleRow, wasCatchup = false): Promise<void> {
   const scope: ResourceScope = { orgId: row.org_id || "default", userId: row.user_id };
   const cube = getCube(row.cube_id, scope);
   if (!cube) {
@@ -203,7 +253,8 @@ async function runClaimed(row: ScheduleRow): Promise<void> {
       parts: [{ type: "text", text: reply || "(no reply)" }],
     };
     saveThreadMessages(chat.id, [...prior, user, assistant], scope);
-    finish(row.id, scope.orgId, "ok", null, new Date().toISOString());
+    const status = wasCatchup ? "catchup_executed" : "ok";
+    finish(row.id, scope.orgId, status, null, new Date().toISOString());
 
     // Generate & Dispatch Autonomous Digest
     const digestInfo = generateDigestSummary({

@@ -1,7 +1,66 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
+import { WasmShellDriver } from "./wasi_shell.ts";
 
 const OUTPUT_CAP = 32_000;
+const SECURITY_CONFIG_PATH = path.join(process.cwd(), "config", "security.json");
+
+let cachedForbiddenPatterns: RegExp[] | null = null;
+
+export function loadForbiddenEnvPatterns(): RegExp[] {
+  if (cachedForbiddenPatterns) return cachedForbiddenPatterns;
+  try {
+    if (fs.existsSync(SECURITY_CONFIG_PATH)) {
+      const raw = fs.readFileSync(SECURITY_CONFIG_PATH, "utf-8");
+      const data = JSON.parse(raw) as { forbiddenEnvPatterns?: string[] };
+      if (Array.isArray(data.forbiddenEnvPatterns)) {
+        cachedForbiddenPatterns = data.forbiddenEnvPatterns.map((p) => new RegExp(p, "i"));
+        return cachedForbiddenPatterns;
+      }
+    }
+  } catch {}
+  cachedForbiddenPatterns = [
+    /KEY/i,
+    /SECRET/i,
+    /TOKEN/i,
+    /AUTH/i,
+    /PASSWORD/i,
+    /DESKID/i,
+    /GROQ/i,
+    /OPENAI/i,
+    /ANTHROPIC/i,
+    /GEMINI/i,
+    /OLLAMA/i,
+    /CREDENTIAL/i,
+  ];
+  return cachedForbiddenPatterns;
+}
+
+/**
+ * Strips secret tokens and private host identifiers from execution environments.
+ */
+export function sanitizeSandboxEnv(customEnv?: Record<string, string>, root?: string): NodeJS.ProcessEnv {
+  const safeEnv: Record<string, string> = {
+    PATH: process.env.PATH || "/usr/bin:/bin",
+    HOME: root || "/workspace",
+    LANG: "C.UTF-8",
+    TERM: "dumb",
+  };
+
+  const forbiddenPatterns = loadForbiddenEnvPatterns();
+
+  if (customEnv) {
+    for (const [key, val] of Object.entries(customEnv)) {
+      if (forbiddenPatterns.some((pattern) => pattern.test(key))) {
+        continue;
+      }
+      safeEnv[key] = val;
+    }
+  }
+
+  return safeEnv as unknown as NodeJS.ProcessEnv;
+}
 
 export interface SandboxExecutionOptions {
   root: string;
@@ -9,6 +68,7 @@ export interface SandboxExecutionOptions {
   command: string;
   timeoutMs: number;
   env?: Record<string, string>;
+  networkEgress?: "none" | "restricted" | "full";
 }
 
 export interface SandboxResult {
@@ -100,19 +160,18 @@ export class BwrapDriver implements SandboxDriver {
         "--bind", options.root, options.root,
         "--chdir", options.root,
         "--unshare-all",
-        "--die-with-parent",
-        "bash", "-c", options.command,
       ];
+
+      // Enforce network namespace isolation when egress is none
+      if (options.networkEgress === "none") {
+        args.push("--unshare-net");
+      }
+
+      args.push("--die-with-parent", "bash", "-c", options.command);
 
       const child = spawn("bwrap", args, {
         cwd: options.root,
-        env: {
-          PATH: process.env.PATH || "/usr/bin:/bin",
-          HOME: options.root,
-          LANG: "C.UTF-8",
-          TERM: "dumb",
-          ...(options.env || {}),
-        } as unknown as NodeJS.ProcessEnv,
+        env: sanitizeSandboxEnv(options.env, options.root),
         signal: AbortSignal.timeout(options.timeoutMs),
       });
 
@@ -217,13 +276,7 @@ export class DirectFallbackDriver implements SandboxDriver {
 
       const child = spawn("bash", ["-c", options.command], {
         cwd: options.root,
-        env: {
-          PATH: process.env.PATH || "/usr/bin:/bin",
-          HOME: options.root,
-          LANG: "C.UTF-8",
-          TERM: "dumb",
-          ...(options.env || {}),
-        } as unknown as NodeJS.ProcessEnv,
+        env: sanitizeSandboxEnv(options.env, options.root),
         signal: AbortSignal.timeout(options.timeoutMs),
       });
 
@@ -257,13 +310,17 @@ export function getSandboxDriver(): SandboxDriver {
   const bwrap = new BwrapDriver();
   const docker = new DockerDriver();
   const direct = new DirectFallbackDriver();
+  const wasm = new WasmShellDriver();
 
   if (preferred === "bwrap" && bwrap.isAvailable()) return bwrap;
   if (preferred === "docker" && docker.isAvailable()) return docker;
+  if (preferred === "wasm" && wasm.isAvailable()) return wasm;
   if (preferred === "direct" && process.env.CUBES_ALLOW_UNSAFE_DIRECT === "true") return direct;
 
-  // Auto-detection priority: bwrap -> docker. Never silently run on the host.
+  // Auto-detection priority: bwrap -> docker -> wasm (universal isolate fallback).
   if (bwrap.isAvailable()) return bwrap;
   if (docker.isAvailable()) return docker;
+  if (wasm.isAvailable()) return wasm;
+
   return new UnavailableSandboxDriver();
 }

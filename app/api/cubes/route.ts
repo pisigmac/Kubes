@@ -9,7 +9,7 @@ function jsonError(error: unknown) {
     return Response.json({ error: error.message }, { status: error.status });
   }
   console.error(error);
-  return Response.json({ error: "Could not load Cubes." }, { status: 500 });
+  return Response.json({ error: "Could not load Kubes." }, { status: 500 });
 }
 
 export async function GET(request: Request) {

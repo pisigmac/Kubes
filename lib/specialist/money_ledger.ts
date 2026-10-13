@@ -90,7 +90,38 @@ export function calculateBudgetSummary(transactions: LedgerTransaction[]): Budge
   };
 }
 
-export function recordTransaction(tx: LedgerTransaction, cubeSlug = "money"): BudgetSummary {
+export interface RecordTransactionResult {
+  budgetSummary: BudgetSummary;
+  isDuplicate: boolean;
+  warning?: string;
+  preview: {
+    date: string;
+    payee: string;
+    amount: number;
+    category: string;
+    type: "expense" | "income" | "subscription";
+    status: "recorded" | "duplicate_detected";
+  };
+}
+
+export function checkTransactionDuplicate(
+  tx: LedgerTransaction,
+  existing: LedgerTransaction[],
+): boolean {
+  return existing.some(
+    (t) =>
+      t.date === tx.date &&
+      t.payee.toLowerCase() === tx.payee.toLowerCase() &&
+      Math.abs(t.amount - tx.amount) < 0.001 &&
+      t.type === tx.type,
+  );
+}
+
+export function recordTransaction(
+  tx: LedgerTransaction,
+  cubeSlug = "money",
+  options?: { confirmDuplicate?: boolean },
+): RecordTransactionResult {
   const root = ensureWorkspace(cubeSlug, false);
   const targetFile = "notes/ledger.csv";
   let existing: LedgerTransaction[] = [];
@@ -101,7 +132,36 @@ export function recordTransaction(tx: LedgerTransaction, cubeSlug = "money"): Bu
     existing = [];
   }
 
+  const isDuplicate = checkTransactionDuplicate(tx, existing);
+
+  if (isDuplicate && !options?.confirmDuplicate) {
+    return {
+      budgetSummary: calculateBudgetSummary(existing),
+      isDuplicate: true,
+      warning: `Possible duplicate transaction detected: ${tx.date} - ${tx.payee} ($${tx.amount}). Pass confirmDuplicate=true to commit.`,
+      preview: {
+        date: tx.date,
+        payee: tx.payee,
+        amount: tx.amount,
+        category: tx.category,
+        type: tx.type,
+        status: "duplicate_detected",
+      },
+    };
+  }
+
   existing.unshift(tx);
   writeText(root, targetFile, formatLedgerCsv(existing));
-  return calculateBudgetSummary(existing);
+  return {
+    budgetSummary: calculateBudgetSummary(existing),
+    isDuplicate,
+    preview: {
+      date: tx.date,
+      payee: tx.payee,
+      amount: tx.amount,
+      category: tx.category,
+      type: tx.type,
+      status: "recorded",
+    },
+  };
 }

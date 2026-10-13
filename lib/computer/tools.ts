@@ -10,9 +10,37 @@ import {
   resolveInside,
   writeText,
 } from "./jail.ts";
+import { isSafeCommand } from "./safety.ts";
+import { assertToolAllowed } from "../cubes/policy.ts";
 
+export type ToolImpactLevel = "safe_read" | "consequential_write" | "consequential_exec" | "consequential_external";
 
-type Actor = { slug: string; name: string; isMaestro: boolean; orgId?: string; userId?: string | null };
+export const TOOL_IMPACT: Record<string, ToolImpactLevel> = {
+  computer_list: "safe_read",
+  computer_read: "safe_read",
+  live_search: "safe_read",
+  computer_write: "consequential_write",
+  computer_exec: "consequential_exec",
+  computer_browse: "consequential_external",
+  computer_click: "consequential_external",
+  computer_type: "consequential_external",
+  schedule_task: "consequential_write",
+  update_task: "consequential_write",
+  delete_task: "consequential_write",
+  record_transaction: "consequential_write",
+  track_application: "consequential_write",
+};
+
+export type Actor = {
+  slug: string;
+  name: string;
+  isMaestro: boolean;
+  orgId?: string;
+  userId?: string | null;
+  safeMode?: boolean;
+  approvedCommands?: string[];
+  approvedWrites?: string[];
+};
 
 function failed(error: unknown): { ok: false; summary: string } {
   const summary = error instanceof Error ? error.message : "The computer could not do that.";
@@ -27,6 +55,25 @@ export function computerTools(actor: Actor) {
       description: "Run one shell command in this Cube's directory on the shared computer.",
       inputSchema: z.object({ command: z.string() }),
       execute: async ({ command }) => {
+        try {
+          assertToolAllowed(actor.slug, "computer_exec");
+        } catch (error) {
+          return failed(error);
+        }
+        const trimmed = command.trim();
+        const autoSafe = isSafeCommand(trimmed, actor.approvedCommands);
+        if (actor.safeMode && !autoSafe && !actor.approvedCommands?.includes(trimmed)) {
+          return {
+            ok: false,
+            requiresApproval: true,
+            action: "computer_exec",
+            command: trimmed,
+            summary: `Action requires approval: \`${command.slice(0, 80)}\``,
+            stdout: "",
+            stderr: "Action requires user approval before execution.",
+            exitCode: 1,
+          };
+        }
         try {
           const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command, orgId);
           const summary = `Ran \`${command.slice(0, 80)}\` (${result.exitCode ?? "stopped"})`;
@@ -82,6 +129,16 @@ export function computerTools(actor: Actor) {
       description: "Write a text file in this Cube's own directory. Creates folders. Cannot write another Cube's files.",
       inputSchema: z.object({ path: z.string(), text: z.string() }),
       execute: async ({ path, text }) => {
+        if (actor.safeMode && !actor.approvedWrites?.includes(path.trim())) {
+          return {
+            ok: false,
+            requiresApproval: true,
+            action: "computer_write",
+            path: path.trim(),
+            text,
+            summary: `Action requires approval to write: \`${path}\``,
+          };
+        }
         try {
           const saved = writeText(own(), path, text);
           return { ok: true, summary: `Wrote ${saved}`, path: saved };
@@ -95,6 +152,7 @@ export function computerTools(actor: Actor) {
       inputSchema: z.object({ url: z.string() }),
       execute: async ({ url }) => {
         try {
+          assertToolAllowed(actor.slug, "computer_browse");
           const page = await browse(actor.name, url, orgId);
           return { ok: true, summary: `Opened ${page.url}`, ...page };
         } catch (error) {
@@ -182,8 +240,8 @@ export function computerTools(actor: Actor) {
       }),
       execute: async ({ query, limit }) => {
         try {
-          const { queryMemories } = await import("../memory/store.ts");
-          const memories = queryMemories(actor.slug, query, limit);
+          const { queryMemoriesHybrid } = await import("../memory/store.ts");
+          const memories = await queryMemoriesHybrid(actor.slug, query, limit);
           return {
             ok: true,
             summary: `Recalled ${memories.length} memories for "${query}"`,
@@ -204,11 +262,12 @@ export function computerTools(actor: Actor) {
         status: z.enum(["Wishlist", "Applied", "Interviewing", "Offer", "Rejected"]).optional().default("Applied"),
         nextStep: z.string().optional().default("Follow up"),
         notes: z.string().optional().default(""),
+        confirmDuplicate: z.boolean().optional().default(false).describe("Pass true to commit or update duplicate application entries"),
       }),
-      execute: async ({ role, company, link, status, nextStep, notes }) => {
+      execute: async ({ role, company, link, status, nextStep, notes, confirmDuplicate }) => {
         try {
           const { recordApplication } = await import("../specialist/job_hunt.ts");
-          const apps = recordApplication(
+          const result = recordApplication(
             {
               role,
               company,
@@ -219,11 +278,16 @@ export function computerTools(actor: Actor) {
               notes: notes || "",
             },
             actor.slug,
+            { confirmDuplicate },
           );
           return {
             ok: true,
-            summary: `Recorded application: ${role} at ${company} [${status}]`,
-            totalApplications: apps.length,
+            summary: result.isDuplicate && !result.updated
+              ? `Duplicate detected for ${role} at ${company}. Pass confirmDuplicate=true to commit.`
+              : `Recorded application: ${role} at ${company} [${status}]`,
+            totalApplications: result.applications.length,
+            isDuplicate: result.isDuplicate,
+            preview: result.preview,
           };
         } catch (error) {
           return failed(error);
@@ -239,11 +303,12 @@ export function computerTools(actor: Actor) {
         category: z.string().describe("Expense category e.g. Rent, Groceries, Cloud, Salary"),
         type: z.enum(["expense", "income", "subscription"]).optional().default("expense"),
         notes: z.string().optional().default(""),
+        confirmDuplicate: z.boolean().optional().default(false).describe("Pass true to confirm and commit a duplicate transaction"),
       }),
-      execute: async ({ payee, amount, category, type, notes }) => {
+      execute: async ({ payee, amount, category, type, notes, confirmDuplicate }) => {
         try {
           const { recordTransaction } = await import("../specialist/money_ledger.ts");
-          const summary = recordTransaction(
+          const result = recordTransaction(
             {
               date: new Date().toISOString().slice(0, 10),
               payee,
@@ -253,11 +318,16 @@ export function computerTools(actor: Actor) {
               notes: notes || "",
             },
             actor.slug,
+            { confirmDuplicate },
           );
           return {
             ok: true,
-            summary: `Recorded ${type}: $${amount} for ${payee} (${category})`,
-            budgetSummary: summary,
+            summary: result.isDuplicate && result.warning
+              ? result.warning
+              : `Recorded ${type}: $${amount} for ${payee} (${category})`,
+            budgetSummary: result.budgetSummary,
+            isDuplicate: result.isDuplicate,
+            preview: result.preview,
           };
         } catch (error) {
           return failed(error);

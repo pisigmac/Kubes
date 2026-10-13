@@ -34,6 +34,7 @@ test("Job Hunt: parses, formats, and persists application tracker rows", () => {
   assert.ok(formatted.includes("OpenAI Labs"));
 
   // Record application in test workspace
+  const testJobSlug = `test-job-hunt-${Date.now()}`;
   const updated = recordApplication(
     {
       role: "Staff AI Engineer",
@@ -44,13 +45,32 @@ test("Job Hunt: parses, formats, and persists application tracker rows", () => {
       date: "2026-10-05",
       notes: "Autonomous agents role",
     },
-    "test-job-hunt",
+    testJobSlug,
   );
 
-  assert.ok(updated.length >= 1);
-  assert.equal(updated[0].company, "DeepMind");
+  assert.ok(updated.applications.length >= 1);
+  assert.equal(updated.applications[0].company, "DeepMind");
+  assert.equal(updated.isDuplicate, false);
+  assert.equal(updated.preview.action, "created");
 
-  const fetched = getApplications("test-job-hunt");
+  // Duplicate check
+  const dupCheck = recordApplication(
+    {
+      role: "Staff AI Engineer",
+      company: "DeepMind",
+      link: "https://deepmind.google/careers",
+      status: "Wishlist",
+      nextStep: "Reach out to hiring manager",
+      date: "2026-10-05",
+      notes: "Autonomous agents role",
+    },
+    testJobSlug,
+  );
+  assert.equal(dupCheck.isDuplicate, true);
+  assert.equal(dupCheck.updated, false);
+  assert.equal(dupCheck.preview.action, "duplicate_detected");
+
+  const fetched = getApplications(testJobSlug);
   assert.ok(fetched.some((a) => a.company === "DeepMind"));
 });
 
@@ -78,7 +98,8 @@ test("Money: parses CSV, records transactions, and computes budget summaries", (
   assert.equal(summary.subscriptions.length, 1);
 
   // Record a transaction
-  const updatedSummary = recordTransaction(
+  const testMoneySlug = `test-money-${Date.now()}`;
+  const updatedResult = recordTransaction(
     {
       date: "2026-10-05",
       payee: "Coffee Shop",
@@ -87,10 +108,28 @@ test("Money: parses CSV, records transactions, and computes budget summaries", (
       type: "expense",
       notes: "Espresso",
     },
-    "test-money",
+    testMoneySlug,
   );
 
-  assert.ok(updatedSummary.totalExpenses >= 15);
+  assert.ok(updatedResult.budgetSummary.totalExpenses >= 15);
+  assert.equal(updatedResult.isDuplicate, false);
+  assert.equal(updatedResult.preview.status, "recorded");
+
+  // Duplicate transaction detection without confirmDuplicate
+  const dupTxResult = recordTransaction(
+    {
+      date: "2026-10-05",
+      payee: "Coffee Shop",
+      category: "Dining",
+      amount: 15,
+      type: "expense",
+      notes: "Espresso",
+    },
+    testMoneySlug,
+  );
+  assert.equal(dupTxResult.isDuplicate, true);
+  assert.ok(dupTxResult.warning?.includes("duplicate"));
+  assert.equal(dupTxResult.preview.status, "duplicate_detected");
 });
 
 test("Learn / Work: generates and saves Mermaid diagram artifacts", () => {

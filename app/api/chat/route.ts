@@ -25,9 +25,29 @@ export async function POST(request: Request) {
       threadId?: string;
       providerId?: string;
       providerKey?: string;
+      safeMode?: boolean;
+      approvedCommands?: string[];
+      approvedWrites?: string[];
     };
     const providerId = body.providerId || request.headers.get("x-kubes-provider-id") || undefined;
     const providerKey = body.providerKey || request.headers.get("x-kubes-provider-key") || undefined;
+    const safeMode =
+      body.safeMode !== undefined
+        ? Boolean(body.safeMode)
+        : request.headers.get("x-kubes-safe-mode") === "true";
+    let approvedCommands = body.approvedCommands;
+    if (!approvedCommands && request.headers.get("x-kubes-approved-commands")) {
+      try {
+        approvedCommands = JSON.parse(request.headers.get("x-kubes-approved-commands") || "[]");
+      } catch {}
+    }
+    let approvedWrites = body.approvedWrites;
+    if (!approvedWrites && request.headers.get("x-kubes-approved-writes")) {
+      try {
+        approvedWrites = JSON.parse(request.headers.get("x-kubes-approved-writes") || "[]");
+      } catch {}
+    }
+    const approvalOptions = { safeMode, approvedCommands, approvedWrites };
 
     if (!body.cubeId || !body.threadId) return text("cubeId and threadId are required.", 400);
     if (!Array.isArray(body.messages) || body.messages.length === 0) {
@@ -97,7 +117,7 @@ export async function POST(request: Request) {
     try {
       if (cube.isMaestro) {
         return createAgentUIStreamResponse({
-          agent: buildMaestroAgent(cube, providerKey, providerId),
+          agent: buildMaestroAgent(cube, providerKey, providerId, approvalOptions),
           uiMessages,
           originalMessages: uiMessages,
           abortSignal: abortController.signal,
@@ -110,7 +130,7 @@ export async function POST(request: Request) {
       }
 
       return createAgentUIStreamResponse({
-        agent: buildSpecialistAgent(cube, providerKey, providerId),
+        agent: buildSpecialistAgent(cube, providerKey, providerId, approvalOptions),
         uiMessages,
         originalMessages: uiMessages,
         abortSignal: abortController.signal,

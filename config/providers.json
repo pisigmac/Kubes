@@ -10,13 +10,14 @@
       "api_key_url": "https://aistudio.google.com/apikey",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "gemini-2.5-flash",
+      "default_model": "gemini-3.8-flash",
       "models": [
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
-        "gemini-2.5-flash-thinking",
-        "gemini-2.0-flash",
-        "gemini-2.0-pro-exp"
+        "gemini-2.5-flash-thinking"
       ],
       "model_prefixes": ["gemini-", "google/"]
     },
@@ -29,15 +30,17 @@
       "api_key_url": "https://console.groq.com/keys",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "llama-3.3-70b-versatile",
+      "default_model": "llama-4-70b-versatile",
       "models": [
+        "llama-4-70b-versatile",
+        "gpt-oss-120b",
+        "gpt-oss-20b",
+        "qwen-3-32b",
         "deepseek-r1-distill-llama-70b",
         "llama-3.3-70b-versatile",
-        "qwen-qwq-32b",
-        "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768"
+        "llama-3.1-8b-instant"
       ],
-      "model_prefixes": ["llama-", "mixtral-", "gemma2-", "deepseek-r1-distill", "qwen-"]
+      "model_prefixes": ["llama-", "gpt-oss-", "mixtral-", "deepseek-r1-distill", "qwen-"]
     },
     {
       "id": "cerebras",
@@ -119,12 +122,14 @@
       "api_key_url": "https://platform.deepseek.com/api_keys",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "deepseek-reasoner",
+      "default_model": "deepseek-v4.1-flash",
       "models": [
+        "deepseek-v4.1-flash",
+        "deepseek-v4-pro",
         "deepseek-reasoner",
         "deepseek-chat"
       ],
-      "model_prefixes": ["deepseek-reasoner", "deepseek-chat"]
+      "model_prefixes": ["deepseek-"]
     },
     {
       "id": "mistral",
@@ -154,17 +159,21 @@
       "api_key_url": "https://openrouter.ai/keys",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "anthropic/claude-3.7-sonnet",
+      "default_model": "anthropic/claude-sonnet-5.5",
       "models": [
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-haiku-5.5",
         "anthropic/claude-3.7-sonnet",
         "anthropic/claude-3.7-sonnet:thinking",
-        "deepseek/deepseek-r1",
-        "deepseek/deepseek-chat",
-        "google/gemini-2.5-pro",
-        "google/gemini-2.5-flash",
-        "meta-llama/llama-3.3-70b-instruct",
+        "openai/gpt-6-astra",
+        "openai/gpt-6.1-sol",
         "openai/o3-mini",
-        "openai/gpt-4o"
+        "deepseek/deepseek-v4.1-flash",
+        "deepseek/deepseek-r1",
+        "google/gemini-4-argon",
+        "google/gemini-3.8-flash",
+        "meta-llama/llama-4-70b-instruct"
       ],
       "model_prefixes": ["/"]
     },
@@ -177,13 +186,16 @@
       "api_key_url": "https://platform.openai.com/api-keys",
       "tier_type": "credits",
       "credit_card_required": true,
-      "default_model": "o3-mini",
+      "default_model": "gpt-6.1-sol",
       "models": [
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6-luna",
+        "o3",
         "o3-mini",
         "o1",
         "gpt-4.5-preview",
-        "gpt-4o",
-        "gpt-4o-mini"
+        "gpt-4o"
       ],
       "model_prefixes": ["gpt-", "o1", "o3"]
     },
@@ -234,9 +246,10 @@
       "default_model": "grok-4.7",
       "models": [
         "grok-4.7",
+        "grok-4.3",
         "grok-4",
         "grok-3",
-        "grok-2-1212"
+        "grok-3-mini"
       ],
       "model_prefixes": ["grok-"]
     },
@@ -269,9 +282,12 @@
       "default_model": "deepseek-r1:8b",
       "models": [
         "deepseek-r1:70b",
+        "deepseek-r1:14b",
         "deepseek-r1:8b",
         "qwen2.5-coder:32b",
-        "llama3.3:70b"
+        "llama-4:8b",
+        "llama3.3:70b",
+        "phi-4:14b"
       ],
       "model_prefixes": ["ollama/"]
     },
@@ -284,12 +300,13 @@
       "api_key_url": "http://localhost:8080",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "gemini-2.5-flash",
+      "default_model": "gemini-3.8-flash",
       "models": [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "llama-3.3-70b-versatile",
-        "o3-mini"
+        "gemini-3.8-flash",
+        "gemini-4-argon",
+        "llama-4-70b-versatile",
+        "o3-mini",
+        "gpt-6.1-sol"
       ],
       "model_prefixes": []
     },
@@ -302,26 +319,27 @@
       "api_key_url": "http://localhost:9080",
       "tier_type": "permanent",
       "credit_card_required": false,
-      "default_model": "gemini-2.5-flash",
+      "default_model": "gemini-3.8-flash",
       "models": [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "llama-3.3-70b-versatile",
-        "anthropic/claude-3.7-sonnet",
-        "grok-4.7"
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "llama-4-70b-versatile",
+        "anthropic/claude-sonnet-5.5",
+        "grok-4.7",
+        "gpt-6.1-sol"
       ],
       "model_prefixes": []
     }
   ],
   "specialist_recommendations": {
-    "maestro": ["gemini-2.5-flash", "llama-3.3-70b-versatile", "o3-mini", "anthropic/claude-3.7-sonnet", "grok-4.7"],
-    "work": ["deepseek-reasoner", "deepseek-r1-distill-llama-70b", "llama-3.3-70b-versatile", "codestral-latest", "gemini-2.5-pro", "o3-mini"],
-    "focus": ["gemini-2.5-flash", "llama-3.3-70b-versatile", "o3-mini"],
-    "money": ["llama-3.3-70b-versatile", "gemini-2.5-flash", "o3-mini"],
-    "learn": ["gemini-2.5-pro", "deepseek-reasoner", "anthropic/claude-3.7-sonnet", "sonar-reasoning-pro", "gemini-2.5-flash"],
-    "job-hunt": ["gemini-2.5-flash", "llama-3.3-70b-versatile", "sonar-pro", "o3-mini"],
-    "body": ["gemini-2.5-flash", "llama-3.3-70b-versatile"],
-    "write": ["anthropic/claude-3.7-sonnet", "mistral-large-latest", "gemini-2.5-pro", "llama-3.3-70b-versatile", "gpt-4o"],
-    "life-admin": ["gemini-2.5-flash", "o3-mini"]
+    "maestro": ["gemini-3.8-flash", "gpt-6.1-sol", "anthropic/claude-sonnet-5.5", "grok-4.7", "llama-4-70b-versatile"],
+    "work": ["gpt-6.1-sol", "anthropic/claude-sonnet-5.5", "deepseek-reasoner", "qwen2.5-coder:32b", "o3-mini", "codestral-latest"],
+    "focus": ["gemini-3.8-flash", "llama-4-70b-versatile", "gpt-6-luna", "o3-mini"],
+    "money": ["gemini-3.8-flash", "llama-4-70b-versatile", "gpt-6.1-sol", "o3-mini"],
+    "learn": ["gemini-4-argon", "deepseek-reasoner", "anthropic/claude-opus-5.5", "o3", "gemini-3.8-flash"],
+    "job-hunt": ["gemini-3.8-flash", "llama-4-70b-versatile", "sonar-pro", "o3-mini"],
+    "body": ["gemini-3.8-flash", "llama-4-70b-versatile"],
+    "write": ["anthropic/claude-sonnet-5.5", "gpt-6-astra", "gemini-4-argon", "mistral-large-latest"],
+    "life-admin": ["gemini-3.8-flash", "gpt-6-luna", "o3-mini"]
   }
 }

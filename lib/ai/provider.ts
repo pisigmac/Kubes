@@ -50,8 +50,8 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "http://localhost:8080/v1",
       env_key_names: ["KEYMINT_API_KEY", "KEYMINT_TOKEN"],
       env_url_names: ["KEYMINT_URL", "KEYMINT_BASE_URL"],
-      default_model: "gemini-2.5-flash",
-      models: ["gemini-2.5-flash", "gemini-2.5-pro", "llama-3.3-70b-versatile", "o3-mini"],
+      default_model: "gemini-3.8-flash",
+      models: ["gemini-3.8-flash", "gemini-4-argon", "llama-4-70b-versatile", "o3-mini", "gpt-6.1-sol"],
       model_prefixes: [],
     },
     {
@@ -60,13 +60,14 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "http://localhost:9080/v1",
       env_key_names: ["KUBEROUTE_API_KEY", "KUBEMIND_API_KEY"],
       env_url_names: ["KUBEROUTE_GATEWAY_URL", "KUBEMIND_ROUTER_URL"],
-      default_model: "gemini-2.5-flash",
+      default_model: "gemini-3.8-flash",
       models: [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "llama-3.3-70b-versatile",
-        "anthropic/claude-3.7-sonnet",
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "llama-4-70b-versatile",
+        "anthropic/claude-sonnet-5.5",
         "grok-4.7",
+        "gpt-6.1-sol",
       ],
       model_prefixes: [],
     },
@@ -76,13 +77,14 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
       env_key_names: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
       env_url_names: ["GEMINI_BASE_URL"],
-      default_model: "gemini-2.5-flash",
+      default_model: "gemini-3.8-flash",
       models: [
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "gemini-2.5-flash-thinking",
-        "gemini-2.0-flash",
-        "gemini-2.0-pro-exp",
       ],
       model_prefixes: ["gemini-", "google/"],
     },
@@ -92,15 +94,17 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "https://api.groq.com/openai/v1",
       env_key_names: ["GROQ_API_KEY"],
       env_url_names: ["GROQ_BASE_URL"],
-      default_model: "llama-3.3-70b-versatile",
+      default_model: "llama-4-70b-versatile",
       models: [
+        "llama-4-70b-versatile",
+        "gpt-oss-120b",
+        "gpt-oss-20b",
+        "qwen-3-32b",
         "deepseek-r1-distill-llama-70b",
         "llama-3.3-70b-versatile",
-        "qwen-qwq-32b",
         "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768",
       ],
-      model_prefixes: ["llama-", "mixtral-", "gemma2-", "deepseek-r1-distill", "qwen-"],
+      model_prefixes: ["llama-", "gpt-oss-", "mixtral-", "deepseek-r1-distill", "qwen-"],
     },
     {
       id: "openrouter",
@@ -108,15 +112,21 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "https://openrouter.ai/api/v1",
       env_key_names: ["OPENROUTER_API_KEY"],
       env_url_names: ["OPENROUTER_BASE_URL"],
-      default_model: "anthropic/claude-3.7-sonnet",
+      default_model: "anthropic/claude-sonnet-5.5",
       models: [
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-haiku-5.5",
         "anthropic/claude-3.7-sonnet",
         "anthropic/claude-3.7-sonnet:thinking",
-        "deepseek/deepseek-r1",
-        "google/gemini-2.5-pro",
-        "meta-llama/llama-3.3-70b-instruct",
+        "openai/gpt-6-astra",
+        "openai/gpt-6.1-sol",
         "openai/o3-mini",
-        "openai/gpt-4o",
+        "deepseek/deepseek-v4.1-flash",
+        "deepseek/deepseek-r1",
+        "google/gemini-4-argon",
+        "google/gemini-3.8-flash",
+        "meta-llama/llama-4-70b-instruct",
       ],
       model_prefixes: ["/"],
     },
@@ -126,8 +136,8 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       default_base_url: "https://api.openai.com/v1",
       env_key_names: ["OPENAI_API_KEY"],
       env_url_names: ["OPENAI_BASE_URL"],
-      default_model: "o3-mini",
-      models: ["o3-mini", "o1", "gpt-4.5-preview", "gpt-4o", "gpt-4o-mini"],
+      default_model: "gpt-6.1-sol",
+      models: ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "o3", "o3-mini", "o1", "gpt-4.5-preview", "gpt-4o"],
       model_prefixes: ["gpt-", "o1", "o3"],
     },
     {
@@ -137,7 +147,7 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       env_key_names: ["XAI_API_KEY"],
       env_url_names: ["XAI_BASE_URL"],
       default_model: "grok-4.7",
-      models: ["grok-4.7", "grok-4", "grok-3", "grok-2-1212"],
+      models: ["grok-4.7", "grok-4.3", "grok-4", "grok-3", "grok-3-mini"],
       model_prefixes: ["grok-"],
     },
     {
@@ -147,20 +157,20 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       env_key_names: ["OLLAMA_API_KEY"],
       env_url_names: ["OLLAMA_BASE_URL"],
       default_model: "deepseek-r1:8b",
-      models: ["deepseek-r1:70b", "deepseek-r1:8b", "qwen2.5-coder:32b", "llama3.3:70b"],
+      models: ["deepseek-r1:70b", "deepseek-r1:14b", "deepseek-r1:8b", "qwen2.5-coder:32b", "llama-4:8b", "llama3.3:70b", "phi-4:14b"],
       model_prefixes: ["ollama/"],
     },
   ],
   specialist_recommendations: {
-    maestro: ["gemini-2.5-flash", "llama-3.3-70b-versatile", "o3-mini", "anthropic/claude-3.7-sonnet", "grok-4.7"],
-    work: ["deepseek-r1-distill-llama-70b", "llama-3.3-70b-versatile", "gemini-2.5-pro", "o3-mini", "anthropic/claude-3.7-sonnet"],
-    focus: ["gemini-2.5-flash", "llama-3.3-70b-versatile", "o3-mini"],
-    money: ["llama-3.3-70b-versatile", "gemini-2.5-flash", "o3-mini"],
-    learn: ["gemini-2.5-pro", "deepseek-r1-distill-llama-70b", "anthropic/claude-3.7-sonnet", "gemini-2.5-flash"],
-    "job-hunt": ["gemini-2.5-flash", "llama-3.3-70b-versatile", "o3-mini"],
-    body: ["gemini-2.5-flash", "llama-3.3-70b-versatile"],
-    write: ["anthropic/claude-3.7-sonnet", "gemini-2.5-pro", "llama-3.3-70b-versatile", "gpt-4o"],
-    "life-admin": ["gemini-2.5-flash", "o3-mini"],
+    maestro: ["gemini-3.8-flash", "gpt-6.1-sol", "anthropic/claude-sonnet-5.5", "grok-4.7", "llama-4-70b-versatile"],
+    work: ["gpt-6.1-sol", "anthropic/claude-sonnet-5.5", "deepseek-reasoner", "qwen2.5-coder:32b", "o3-mini", "codestral-latest"],
+    focus: ["gemini-3.8-flash", "llama-4-70b-versatile", "gpt-6-luna", "o3-mini"],
+    money: ["gemini-3.8-flash", "llama-4-70b-versatile", "gpt-6.1-sol", "o3-mini"],
+    learn: ["gemini-4-argon", "deepseek-reasoner", "anthropic/claude-opus-5.5", "o3", "gemini-3.8-flash"],
+    "job-hunt": ["gemini-3.8-flash", "llama-4-70b-versatile", "sonar-pro", "o3-mini"],
+    body: ["gemini-3.8-flash", "llama-4-70b-versatile"],
+    write: ["anthropic/claude-sonnet-5.5", "gpt-6-astra", "gemini-4-argon", "mistral-large-latest"],
+    "life-admin": ["gemini-3.8-flash", "gpt-6-luna", "o3-mini"],
   },
 };
 
@@ -277,7 +287,29 @@ function providerFetch(providerId: ProviderId): typeof fetch | undefined {
   };
 }
 
+const runtimeKeys = new Map<string, string>();
+let runtimeActiveProvider: ProviderId | null = null;
+
+export function setRuntimeProviderKey(providerId: string, apiKey: string): void {
+  runtimeKeys.set(providerId, apiKey.trim());
+}
+
+export function getRuntimeProviderKey(providerId: string): string | undefined {
+  return runtimeKeys.get(providerId);
+}
+
+export function setRuntimeActiveProvider(providerId: ProviderId | null): void {
+  runtimeActiveProvider = providerId;
+}
+
+export function getRuntimeActiveProvider(): ProviderId | null {
+  return runtimeActiveProvider;
+}
+
 export function getProviderEnvKey(provider: ProviderDefinition): string | undefined {
+  const runtimeKey = getRuntimeProviderKey(provider.id);
+  if (runtimeKey) return runtimeKey;
+
   for (const envName of provider.envKeyNames) {
     const val = process.env[envName]?.trim();
     if (val) return val;
@@ -428,7 +460,34 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
     }
   }
 
-  // 2. Match first active configured provider
+  // 2. Prioritize active runtime provider if explicitly selected
+  const activeId = getRuntimeActiveProvider();
+  if (activeId) {
+    const activeProvider = registry.find((p) => p.id === activeId);
+    if (activeProvider) {
+      const key = getProviderEnvKey(activeProvider);
+      if (key || activeProvider.id === "ollama") {
+        const headers: Record<string, string> = {};
+        if (activeProvider.id === "openrouter") {
+          headers["HTTP-Referer"] = "http://localhost:3000";
+          headers["X-Title"] = "Kubes";
+        } else if (activeProvider.id === "kuberoute") {
+          headers["X-KubeRoute-Client"] = "kubes-v1";
+        }
+
+        return {
+          providerId: activeProvider.id,
+          name: activeProvider.name,
+          baseURL: getProviderEnvURL(activeProvider),
+          apiKey: key || "ollama",
+          headers,
+          modelId,
+        };
+      }
+    }
+  }
+
+  // 3. Match first active configured provider
   for (const provider of registry) {
     const key = getProviderEnvKey(provider);
     if (key) {

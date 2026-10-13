@@ -65,13 +65,69 @@ export function ProviderModal({
   const [customKey, setCustomKey] = useState<string>("");
   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
   const keyInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onModelSelectRef = useRef(onModelSelect);
+
+  useEffect(() => {
+    onModelSelectRef.current = onModelSelect;
+  });
+
+  // Focus trapping and Escape key listener
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === "Tab" && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Initial focus on close button or modal container
+    requestAnimationFrame(() => {
+      const firstFocusable = modalRef.current?.querySelector<HTMLElement>("button, input");
+      firstFocusable?.focus();
+    });
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
     let isCurrent = true;
     fetch("/api/providers")
       .then((res) => res.json())
-      .then((data: { providers?: ProviderItem[] }) => {
+      .then((data: { providers?: ProviderItem[]; activeProvider?: string }) => {
         if (isCurrent && data.providers) {
           const browserKeys = readBrowserProviderKeys();
           setProviders(
@@ -80,11 +136,11 @@ export function ProviderModal({
               configured: provider.configured || Boolean(browserKeys[provider.id]),
             })),
           );
-          const activeProvider = window.localStorage.getItem(BROWSER_ACTIVE_PROVIDER);
+          const activeProvider = window.localStorage.getItem(BROWSER_ACTIVE_PROVIDER) || data.activeProvider;
           if (activeProvider) {
             setSelectedProvider(activeProvider);
             const activeProviderConfig = data.providers.find((provider) => provider.id === activeProvider);
-            if (activeProviderConfig?.defaultModel) onModelSelect?.(activeProviderConfig.defaultModel);
+            if (activeProviderConfig?.defaultModel) onModelSelectRef.current?.(activeProviderConfig.defaultModel);
           }
           setLoading(false);
           const activeKey = activeProvider ? browserKeys[activeProvider] : undefined;
@@ -120,6 +176,29 @@ export function ProviderModal({
       isCurrent = false;
     };
   }, [isOpen]);
+
+  async function handleActivate(providerId: string) {
+    const browserKey = readBrowserProviderKeys()[providerId];
+    const effectiveKey = browserKey || undefined;
+    try {
+      await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "activate",
+          providerId,
+          apiKey: effectiveKey,
+        }),
+      });
+      window.localStorage.setItem(BROWSER_ACTIVE_PROVIDER, providerId);
+      window.dispatchEvent(new Event(BROWSER_PROVIDER_UPDATED));
+      setSelectedProvider(providerId);
+      const provider = providers.find((item) => item.id === providerId);
+      if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
+    } catch (err) {
+      console.error("Failed to activate provider", err);
+    }
+  }
 
   async function handleTest(providerId: string, apiKey?: string) {
     setTestingId(providerId);
@@ -163,7 +242,17 @@ export function ProviderModal({
         window.dispatchEvent(new Event(BROWSER_PROVIDER_UPDATED));
         setCustomKey(effectiveKey);
         const provider = providers.find((item) => item.id === providerId);
-        if (provider?.defaultModel) onModelSelect?.(provider.defaultModel);
+        if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
+
+        void fetch("/api/providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "activate",
+            providerId,
+            apiKey: effectiveKey,
+          }),
+        }).catch((e) => console.warn("Failed to activate provider on server:", e));
       }
       if (body.ok && body.models?.length) {
         setProviders((current) =>
@@ -188,7 +277,7 @@ export function ProviderModal({
     window.localStorage.setItem(BROWSER_ACTIVE_PROVIDER, providerId);
     setCustomKey(readBrowserProviderKeys()[providerId] || "");
     const provider = providers.find((item) => item.id === providerId);
-    if (provider?.defaultModel) onModelSelect?.(provider.defaultModel);
+    if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
     requestAnimationFrame(() => {
       keyInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       keyInputRef.current?.focus();
@@ -199,13 +288,21 @@ export function ProviderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl overflow-hidden">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="provider-modal-title"
+        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#0c0c0e] shadow-2xl overflow-hidden"
+      >
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
           <div className="flex items-center gap-3">
             <span className="text-xl">🔑</span>
             <div>
-              <h2 className="text-base font-semibold text-white">AI Provider & KeyMint Gateway</h2>
+              <h2 id="provider-modal-title" className="text-base font-semibold text-white">
+                AI Provider & KeyMint Gateway
+              </h2>
               <p className="text-xs text-white/50">
                 Multi-provider routing with free tier auto-discovery and zero-trust proxy
               </p>
@@ -214,6 +311,7 @@ export function ProviderModal({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close provider modal"
             className="rounded-full p-1.5 text-white/50 hover:bg-white/10 hover:text-white transition"
           >
             ✕
@@ -294,6 +392,20 @@ export function ProviderModal({
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {p.configured && selectedProvider === p.id ? (
+                            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                              ✓ Active
+                            </span>
+                          ) : p.configured ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleActivate(p.id)}
+                              className="rounded-full border border-[#e7ff3a]/40 bg-[#e7ff3a]/10 px-2.5 py-1 text-[11px] font-medium text-[#e7ff3a] hover:bg-[#e7ff3a]/20 transition"
+                            >
+                              Activate
+                            </button>
+                          ) : null}
+
                           {p.configured ? (
                             <button
                               type="button"

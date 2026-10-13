@@ -110,3 +110,50 @@
   - *Static port binding*: Rejected per repository zero-collision directive.
 - **Consequences & System Impact**:
   All platform invariants verified. Standardized operational documentation established in `docs/END-TO-END-VERIFICATION.md`, `docs/UI-TESTING.md`, and `docs/TESTS.md`.
+
+---
+
+## [ADR-007] Out-of-Band Egress Credential Proxying & Token Sanitization
+
+- **Context & Problem Statement**:
+  Sandbox execution processes could inspect injected environment variables (`process.env` / `options.env`), risking token leakage if malicious or untrusted bash commands ran `env` or `cat /proc/self/environ`.
+- **Decision Made**:
+  Implemented an out-of-band egress proxy pattern (`lib/computer/egress_proxy.ts`) based on NVIDIA OpenShell. All credentials matching sensitive token patterns in `config/security.json` are stripped from process execution environments. When agents make outbound requests, local proxy endpoints inject the appropriate bearer credentials dynamically.
+- **Rationale**:
+  Zero-knowledge execution environments prevent prompt-injection attacks or rogue commands from discovering private API keys.
+- **Consequences & System Impact**:
+  Shell commands running in Bubblewrap or Docker see zero secret tokens.
+
+---
+
+## [ADR-008] In-Process Virtual POSIX Shell Isolate Fallback
+
+- **Context & Problem Statement**:
+  Hosts lacking unprivileged user namespaces (`bwrap`) or container engines (`docker`) previously threw runtime availability errors, blocking agent execution on restricted environments.
+- **Decision Made**:
+  Created `WasmShellDriver` (`lib/computer/wasi_shell.ts`) implementing an in-memory virtual POSIX shell isolate for safe execution bounded strictly inside the workspace root.
+- **Rationale**:
+  Provides guaranteed fail-closed execution without requiring root privileges or host namespaces, inspired by Cloudflare Computer's `just-bash` architecture.
+- **Consequences & System Impact**:
+  Kubes can reliably execute agent scripts on any platform with deterministic sandbox isolation.
+
+---
+
+## [ADR-009] Hierarchical Swarm Collaboration DAG & Parallel Delegation Engine
+
+- **Context & Problem Statement**:
+  Complex multi-disciplinary user goals (e.g., relocation planning, financial and job analysis, architectural designs) required manual user context switching between independent Kubes. Single-agent routing could not execute sub-tasks concurrently or synthesize combined multi-domain outputs.
+- **Decision Made**:
+  Built Phase 5 Multi-Agent Swarm Collaboration:
+  1. **DAG Protocol & Solver (`lib/cubes/swarm.ts`)**: Directed acyclic graph schema with cycle detection via graph-coloring DFS, topological batching (`getExecutionBatches`), and cascading failure isolation.
+  2. **Parallel Execution Engine & SSE Streaming API (`lib/cubes/swarm_runner.ts`, `app/api/swarm/route.ts`)**: Batched concurrent sub-agent execution via `Promise.allSettled`, automated upstream output injection, and real-time SSE streaming.
+  3. **Live Visual Swarm DAG UI Component (`components/swarm-dag.tsx`, `components/cube-chat.tsx`)**: Real-time stage batch cards, node status badges, duration timers, task inspection modal dialog (`role="dialog"`), and dedicated `⚡ Swarm` mode chat toggle.
+  4. **Maestro Executive Synthesis Node (`lib/cubes/synthesizer.ts`)**: Cross-domain synthesis with automatic deliverable extraction (diagrams, spreadsheets, markdown files, code) and actionable checklist next steps.
+- **Rationale**:
+  Enables autonomous, concurrent delegation across specialized agents with fail-closed dependency isolation and real-time visual progress monitoring.
+- **Alternatives Considered & Why Rejected**:
+  - *Sequential handoffs*: Slow and could not run independent sub-tasks concurrently.
+  - *Fully autonomous unstructured swarms*: Unpredictable token consumption and potential infinite loops without strict DAG guarantees.
+- **Consequences & System Impact**:
+  Composite multi-domain objectives execute in parallel with topological safety, zero regression on existing single-agent chats, and unified executive briefings.
+

@@ -55,3 +55,22 @@ test("Memory lifecycle: save, query with scoring, list, update, and delete", () 
   assert.ok(!afterDelete.some((m) => m.id === m1.id));
   assert.equal(getMemory(m1.id), null);
 });
+
+test("queryMemoriesHybrid falls back gracefully to lexical SQLite search when Kubemind is offline", async () => {
+  const { queryMemoriesHybrid } = await import("./store.ts");
+
+  const m = saveMemory({
+    cubeSlug: "money",
+    category: "fact",
+    content: "Monthly software subscriptions total 350 dollars.",
+    keywords: ["subscriptions", "software", "budget"],
+  });
+
+  try {
+    const results = await queryMemoriesHybrid("money", "software subscriptions budget", 3);
+    assert.ok(results.length > 0);
+    assert.equal(results[0].id, m.id);
+  } finally {
+    deleteMemory(m.id);
+  }
+});

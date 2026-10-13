@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/computer/*.test.ts lib/memory/*.test.ts lib/auth/*.test.ts lib/ai/*.test.ts app/api/*.test.ts",
+    "test": "node --experimental-strip-types --test lib/computer/*.test.ts lib/cubes/*.test.ts lib/memory/*.test.ts lib/auth/*.test.ts lib/ai/*.test.ts app/api/*.test.ts",
     "schedules": "node --experimental-strip-types scripts/scheduler.ts",
     "start:all": "bash scripts/start-all.sh",
     "stop:all": "bash scripts/stop-all.sh",

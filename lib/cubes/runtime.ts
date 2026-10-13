@@ -313,6 +313,7 @@ function buildCubeAgent(
   options: { handoff: boolean; manage: boolean },
   providerKey?: string,
   providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
 ) {
   const orgId = cube.orgId || "default";
   const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
@@ -320,7 +321,16 @@ function buildCubeAgent(
     model: languageModel(cube.model, providerKey, providerId),
     instructions: `${cube.instructions}\n\n${computerBlock(cube, options.handoff)}${roster}`,
     tools: {
-      ...computerTools({ slug: cube.slug, name: cube.name, isMaestro: cube.isMaestro, orgId: cube.orgId, userId: cube.userId }),
+      ...computerTools({
+        slug: cube.slug,
+        name: cube.name,
+        isMaestro: cube.isMaestro,
+        orgId: cube.orgId,
+        userId: cube.userId,
+        safeMode: approvalOptions?.safeMode,
+        approvedCommands: approvalOptions?.approvedCommands,
+        approvedWrites: approvalOptions?.approvedWrites,
+      }),
       ...scheduleTools(cube),
       ...(options.handoff ? { handoff: handoffTool(cube) } : {}),
       ...(options.manage ? manageTools(cube) : {}),
@@ -329,12 +339,22 @@ function buildCubeAgent(
   });
 }
 
-export function buildMaestroAgent(cube: Cube, providerKey?: string, providerId?: string) {
-  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId);
+export function buildMaestroAgent(
+  cube: Cube,
+  providerKey?: string,
+  providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
+) {
+  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId, approvalOptions);
 }
 
-export function buildSpecialistAgent(cube: Cube, providerKey?: string, providerId?: string) {
-  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId);
+export function buildSpecialistAgent(
+  cube: Cube,
+  providerKey?: string,
+  providerId?: string,
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
+) {
+  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId, approvalOptions);
 }
 
 export async function runCubeInstruction(

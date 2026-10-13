@@ -24,6 +24,8 @@
 .DS_Store
 *.pem
 backlog/
+backlog.d/
+docs/BACKLOG.md
 PROPOSED*.md
 # debug
 npm-debug.log*

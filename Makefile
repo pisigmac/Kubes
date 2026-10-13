@@ -1,4 +1,4 @@
-.PHONY: start stop restart status logs doctor seed test build lint verify
+.PHONY: start stop restart status logs doctor seed test build lint verify test-e2e
 
 start:
 	@bash ./scripts/start_all.sh $(ARGS)
@@ -23,6 +23,9 @@ seed:
 
 test:
 	@pnpm test
+
+test-e2e:
+	@pnpm run test:ui
 
 build:
 	@pnpm build

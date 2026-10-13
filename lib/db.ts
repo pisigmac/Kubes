@@ -67,6 +67,8 @@ function migrate(database: Database.Database) {
       last_status TEXT,
       last_error TEXT,
       thread_id TEXT,
+      timezone TEXT NOT NULL DEFAULT 'UTC',
+      catchup_policy TEXT NOT NULL DEFAULT 'skip_missed',
       org_id TEXT NOT NULL DEFAULT 'default',
       user_id TEXT,
       created_at TEXT NOT NULL,
@@ -115,12 +117,14 @@ function migrate(database: Database.Database) {
     );
   `);
 
-  // Migrate existing tables if they were created without org_id / user_id
+  // Migrate existing tables if they were created without org_id / user_id / timezone / catchup_policy
   const tables = ["cubes", "threads", "messages", "schedules", "command_logs", "memories", "digests"];
   for (const table of tables) {
     addColumnIfNotExists(database, table, "org_id", "TEXT NOT NULL DEFAULT 'default'");
     addColumnIfNotExists(database, table, "user_id", "TEXT");
   }
+  addColumnIfNotExists(database, "schedules", "timezone", "TEXT NOT NULL DEFAULT 'UTC'");
+  addColumnIfNotExists(database, "schedules", "catchup_policy", "TEXT NOT NULL DEFAULT 'skip_missed'");
 
   // Create indexes now that all columns are guaranteed to exist
   database.exec(`

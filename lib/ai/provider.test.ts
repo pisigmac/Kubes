@@ -20,7 +20,7 @@ test("Provider Config: loads config/providers.json correctly", () => {
   const recommendations = getSpecialistRecommendations();
   assert.ok(recommendations);
   assert.ok(Array.isArray(recommendations.work));
-  assert.ok(recommendations.work.includes("deepseek-r1-distill-llama-70b") || recommendations.work.includes("llama-3.3-70b-versatile"));
+  assert.ok(recommendations.work.includes("gpt-6.1-sol") || recommendations.work.includes("deepseek-reasoner"));
 });
 
 test("Provider: detects active providers and returns status list", () => {
@@ -39,15 +39,15 @@ test("Provider: detects active providers and returns status list", () => {
 
 test("Provider: model routing resolves matching provider by prefix", () => {
   // Test Gemini prefix
-  const geminiRoute = resolveProviderForModel("gemini-2.5-flash");
+  const geminiRoute = resolveProviderForModel("gemini-3.8-flash");
   assert.ok(geminiRoute.baseURL.includes("googleapis.com") || geminiRoute.baseURL.length > 0);
 
   // Test Groq prefix
-  const groqRoute = resolveProviderForModel("llama-3.3-70b-versatile");
+  const groqRoute = resolveProviderForModel("llama-4-70b-versatile");
   assert.ok(groqRoute.baseURL.length > 0);
 
   // Test OpenRouter prefix
-  const routerRoute = resolveProviderForModel("anthropic/claude-3.7-sonnet");
+  const routerRoute = resolveProviderForModel("anthropic/claude-sonnet-5.5");
   assert.ok(routerRoute.baseURL.length > 0);
 });
 
@@ -69,14 +69,41 @@ test("Models: listModels returns available model IDs", async () => {
   assert.ok(Array.isArray(listed.ids));
   assert.ok(listed.ids.length > 0);
   assert.ok(typeof listed.live === "boolean");
-  assert.ok(listed.ids.includes("gemini-2.5-flash") || listed.ids.includes("gemini-2.5-pro"));
+  assert.ok(
+    listed.ids.includes("gemini-3.8-flash") ||
+    listed.ids.includes("gemini-2.5-flash") ||
+    listed.ids.includes("models/gemini-3.8-flash")
+  );
 });
 
 test("Models: coerceModel returns valid model or default fallback", async () => {
-  const coercedValid = await coerceModel("gemini-2.5-flash");
-  assert.equal(coercedValid, "gemini-2.5-flash");
+  const coercedValid = await coerceModel("gemini-3.8-flash");
+  assert.equal(coercedValid, "gemini-3.8-flash");
 
   const fallback = defaultModel();
   const coercedEmpty = await coerceModel("");
   assert.equal(coercedEmpty, fallback);
+});
+
+test("Provider: runtime provider key registration and session activation", async () => {
+  const {
+    setRuntimeProviderKey,
+    getRuntimeProviderKey,
+    setRuntimeActiveProvider,
+    getRuntimeActiveProvider,
+    resolveProviderForModel,
+  } = await import("./provider.ts");
+
+  setRuntimeProviderKey("groq", "gsk_test_mock_key_12345");
+  assert.equal(getRuntimeProviderKey("groq"), "gsk_test_mock_key_12345");
+
+  setRuntimeActiveProvider("groq");
+  assert.equal(getRuntimeActiveProvider(), "groq");
+
+  const resolved = resolveProviderForModel("llama-4-70b-versatile");
+  assert.equal(resolved.providerId, "groq");
+  assert.equal(resolved.apiKey, "gsk_test_mock_key_12345");
+
+  // Clean up
+  setRuntimeActiveProvider(null);
 });

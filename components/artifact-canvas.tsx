@@ -126,7 +126,17 @@ export function ArtifactCanvas({
   const hasPreview = isMarkdown || isCsv || isHtml;
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col overflow-hidden border-white/10 bg-[#0e0e11] lg:w-[520px] lg:max-w-[520px] lg:border-l">
+    <aside
+      role="region"
+      aria-label="Artifact viewer"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden border-white/10 bg-[#0e0e11] lg:w-[520px] lg:max-w-[520px] lg:border-l"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3.5 bg-[#0a0a0c]">
         <div className="min-w-0 flex-1">
@@ -216,7 +226,7 @@ export function ArtifactCanvas({
             type="button"
             onClick={onClose}
             className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white transition"
-            aria-label="Close canvas"
+            aria-label="Close artifact viewer"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
