@@ -27,6 +27,73 @@ function asMutation(value: unknown): CubeMutationResult | undefined {
   return value as CubeMutationResult;
 }
 
+const MAESTRO_STARTER_PILLS = [
+  {
+    icon: "⚡",
+    title: "Berlin Relocation Plan",
+    prompt:
+      "Create a complete Berlin Relocation Plan: calculate estimated monthly costs, research top neighborhoods, and list required registration documents.",
+  },
+  {
+    icon: "⚡",
+    title: "Full Stack Tech Stack Decision",
+    prompt:
+      "Compare Next.js, Vite, and Remix for a modern dashboard app with SQLite and generate an architecture trade-off matrix.",
+  },
+  {
+    icon: "⚡",
+    title: "Monthly Financial Audit",
+    prompt:
+      "Conduct a monthly financial audit: analyze sample expense categories, outline cost savings, and generate a budget summary.",
+  },
+];
+
+const SPECIALIST_STARTER_PILLS: Record<string, Array<{ icon: string; title: string; prompt: string }>> = {
+  money: [
+    {
+      icon: "💰",
+      title: "Review Recurring Subscriptions",
+      prompt: "Help me review my monthly subscriptions, identify unused recurring charges, and suggest 3 areas to cut spending.",
+    },
+    {
+      icon: "📊",
+      title: "Analyze Expense CSV",
+      prompt: "I have transactions to review. Create a categorized spending breakdown with total sums and budget alerts.",
+    },
+  ],
+  "job-hunt": [
+    {
+      icon: "💼",
+      title: "Track Senior Engineer Application",
+      prompt: "Log an application for Senior Software Engineer at TechCorp and draft a tailored follow-up email template.",
+    },
+    {
+      icon: "📝",
+      title: "Resume Bullet Polish",
+      prompt: "Help me rewrite 3 engineering resume bullet points using the Google X-Y-Z formula (Accomplished [X] measured by [Y] by doing [Z]).",
+    },
+  ],
+  learn: [
+    {
+      icon: "📚",
+      title: "Swarm Architecture Diagram",
+      prompt: "Generate a Mermaid architecture diagram showing how Maestro orchestrates parallel specialist Kubes in a DAG.",
+    },
+    {
+      icon: "🧠",
+      title: "Tech Concept Deep Dive",
+      prompt: "Explain SQLite WAL mode versus traditional rollback journal with concurrency benchmarks.",
+    },
+  ],
+  work: [
+    {
+      icon: "🛠️",
+      title: "Daily Standup Summary",
+      prompt: "Draft a clear, concise daily standup update based on my recent notes and active git tasks.",
+    },
+  ],
+};
+
 export function Transcript({
   messages,
   cubes,
@@ -34,6 +101,9 @@ export function Transcript({
   onViewArtifact,
   onApproveAction,
   onDenyAction,
+  providerReady,
+  onOpenProviders,
+  onSelectPrompt,
 }: {
   messages: UIMessage[];
   cubes: Cube[];
@@ -41,19 +111,77 @@ export function Transcript({
   onViewArtifact?: (artifact: { name: string; path: string; content: string }) => void;
   onApproveAction?: (action: { type: "exec" | "write"; target: string }) => void;
   onDenyAction?: (action: { type: "exec" | "write"; target: string }) => void;
+  providerReady?: boolean;
+  onOpenProviders?: () => void;
+  onSelectPrompt?: (prompt: string) => void;
 }) {
   if (messages.length === 0) {
+    const isMaestro = activeName === "Maestro";
+    const slugKey = activeName.toLowerCase().replace(/\s+/g, "-");
+    const pills = isMaestro
+      ? MAESTRO_STARTER_PILLS
+      : SPECIALIST_STARTER_PILLS[slugKey] || [
+          {
+            icon: "💬",
+            title: `Ask ${activeName}`,
+            prompt: `Hi ${activeName}, what specialist capabilities can you help me with today?`,
+          },
+        ];
+
     return (
       <div className="mx-auto flex max-w-xl flex-1 flex-col justify-end px-4 pb-8">
         <p className="text-sm uppercase tracking-[0.18em] text-white/40">Kubes</p>
         <h2 className="mt-3 text-3xl font-medium tracking-tight text-balance">
-          {activeName === "Maestro" ? "What should happen next?" : `Talking with ${activeName}`}
+          {isMaestro ? "What should happen next?" : `Talking with ${activeName}`}
         </h2>
         <p className="mt-3 max-w-md text-sm leading-6 text-white/55">
-          {activeName === "Maestro"
-            ? "Maestro hands everyday messes to a specialist Cube. Ask about the next step, a bill, a hard email, or a form you keep avoiding."
+          {isMaestro
+            ? "Maestro orchestrates everyday messes and autonomous multi-agent swarms. Give a composite goal, or pick a starter workflow below."
             : "This Cube answers directly. Maestro is not in the room."}
         </p>
+
+        {/* Guided Onboarding for Fresh Installations */}
+        {providerReady === false ? (
+          <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-950/20 p-5 backdrop-blur-sm">
+            <div className="flex items-center gap-2.5 text-sm font-medium text-amber-300">
+              <span className="text-base">🔑</span>
+              <span>Connect an AI Provider to Get Started</span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-amber-200/80">
+              Kubes runs locally with sandbox process isolation. Connect a free Google Gemini key (via Google AI Studio) or Groq key (via Groq Cloud LPU) to enable responses and multi-agent swarms.
+            </p>
+            {onOpenProviders ? (
+              <button
+                type="button"
+                onClick={onOpenProviders}
+                className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-amber-300"
+              >
+                <span>Configure Free Provider</span>
+                <span>→</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Starter Composite Workflow Pills */}
+        <div className="mt-6 space-y-2.5">
+          <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+            {isMaestro ? "Starter Composite Swarms" : "Suggested Actions"}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pills.map((pill) => (
+              <button
+                key={pill.title}
+                type="button"
+                onClick={() => onSelectPrompt?.(pill.prompt)}
+                className="group flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-xs text-white/80 transition hover:border-[#e7ff3a]/40 hover:bg-white/[0.06] hover:text-white"
+              >
+                <span className="text-sm">{pill.icon}</span>
+                <span className="font-medium">{pill.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

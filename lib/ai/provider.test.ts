@@ -8,6 +8,10 @@ import {
   loadProvidersConfig,
   getSpecialistRecommendations,
   normalizeGeminiSseLine,
+  createResilientFetch,
+  isRateLimitOrQuotaError,
+  formatProviderErrorMessage,
+  parseRetryAfterMs,
 } from "./provider.ts";
 import { listModels, coerceModel } from "./models.ts";
 
@@ -107,3 +111,121 @@ test("Provider: runtime provider key registration and session activation", async
   // Clean up
   setRuntimeActiveProvider(null);
 });
+
+test("Provider Resilience: parses Retry-After header correctly", () => {
+  assert.equal(parseRetryAfterMs("5"), 5000);
+  assert.equal(parseRetryAfterMs("0"), 0);
+  assert.equal(parseRetryAfterMs(""), null);
+  assert.equal(parseRetryAfterMs(null), null);
+  assert.equal(parseRetryAfterMs("invalid-string"), null);
+
+  const future = new Date(Date.now() + 10000).toUTCString();
+  const parsed = parseRetryAfterMs(future);
+  assert.ok(parsed !== null && parsed > 5000 && parsed <= 10000);
+});
+
+test("Provider Resilience: error classification and formatting", () => {
+  assert.equal(isRateLimitOrQuotaError(new Error("HTTP 429 Too Many Requests")), true);
+  assert.equal(isRateLimitOrQuotaError(new Error("Rate limit exceeded")), true);
+  assert.equal(isRateLimitOrQuotaError(new Error("RESOURCE_EXHAUSTED")), true);
+  assert.equal(isRateLimitOrQuotaError(new Error("quota reached")), true);
+  assert.equal(isRateLimitOrQuotaError(new Error("File not found")), false);
+
+  const rateMsg = formatProviderErrorMessage(new Error("Rate limit exceeded"), "gemini");
+  assert.match(rateMsg, /\[gemini\] Provider rate limit/);
+
+  const authMsg = formatProviderErrorMessage(new Error("401 Unauthorized"), "groq");
+  assert.match(authMsg, /\[groq\] API key is invalid/);
+
+  const overloadMsg = formatProviderErrorMessage(new Error("503 Service Unavailable"), "openrouter");
+  assert.match(overloadMsg, /\[openrouter\] Provider service is temporarily overloaded/);
+});
+
+test("Provider Resilience: createResilientFetch retries 429 and succeeds on subsequent attempt", async () => {
+  let callCount = 0;
+  const mockFetch: typeof fetch = async () => {
+    callCount++;
+    if (callCount === 1) {
+      return new Response(JSON.stringify({ error: "Rate limited" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ choices: [{ text: "Success" }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const resilientFetch = createResilientFetch("gemini", {
+    maxRetries: 2,
+    initialDelayMs: 10,
+    maxDelayMs: 50,
+    fetchFn: mockFetch,
+  });
+
+  const response = await resilientFetch("https://api.mock/test");
+  assert.equal(response.status, 200);
+  assert.equal(callCount, 2);
+});
+
+test("Provider Resilience: createResilientFetch retries 503 service unavailable", async () => {
+  let callCount = 0;
+  const mockFetch: typeof fetch = async () => {
+    callCount++;
+    if (callCount < 3) {
+      return new Response("Service unavailable", { status: 503 });
+    }
+    return new Response("OK", { status: 200 });
+  };
+
+  const resilientFetch = createResilientFetch("groq", {
+    maxRetries: 3,
+    initialDelayMs: 10,
+    maxDelayMs: 50,
+    fetchFn: mockFetch,
+  });
+
+  const response = await resilientFetch("https://api.mock/test");
+  assert.equal(response.status, 200);
+  assert.equal(callCount, 3);
+});
+
+test("Provider Resilience: createResilientFetch does not retry 400 Bad Request", async () => {
+  let callCount = 0;
+  const mockFetch: typeof fetch = async () => {
+    callCount++;
+    return new Response("Bad Request", { status: 400 });
+  };
+
+  const resilientFetch = createResilientFetch("gemini", {
+    maxRetries: 3,
+    initialDelayMs: 10,
+    maxDelayMs: 50,
+    fetchFn: mockFetch,
+  });
+
+  const response = await resilientFetch("https://api.mock/test");
+  assert.equal(response.status, 400);
+  assert.equal(callCount, 1);
+});
+
+test("Provider Resilience: createResilientFetch cancels immediately on abort signal", async () => {
+  const mockFetch: typeof fetch = async () => {
+    return new Response("Rate limited", { status: 429 });
+  };
+
+  const controller = new AbortController();
+  const resilientFetch = createResilientFetch("gemini", {
+    maxRetries: 3,
+    initialDelayMs: 500,
+    maxDelayMs: 1000,
+    fetchFn: mockFetch,
+  });
+
+  const promise = resilientFetch("https://api.mock/test", { signal: controller.signal });
+  setTimeout(() => controller.abort(new Error("User stopped")), 20);
+
+  await assert.rejects(promise, /User stopped|aborted/i);
+});
+

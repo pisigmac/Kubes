@@ -157,3 +157,23 @@
 - **Consequences & System Impact**:
   Composite multi-domain objectives execute in parallel with topological safety, zero regression on existing single-agent chats, and unified executive briefings.
 
+---
+
+## [ADR-010] Production Resilience, Exponential Jitter Backoff, and Teardown Hardening
+
+- **Context & Problem Statement**:
+  Following the implementation of Multi-Agent Swarms, concurrent execution under real-world usage presented three resilience challenges:
+  1. *Burst Rate Limits*: Multiple specialist agents dispatching LLM calls simultaneously could trigger transient HTTP `429 Too Many Requests` or `503 Service Unavailable` provider responses, causing tasks to immediately fail.
+  2. *Process & Resource Leaks on Abort*: Cancelling a running swarm or chat instruction did not reliably terminate spawned Bubblewrap (`bwrap`) child processes or close headless Chromium tabs, risking zombie processes and exclusive seat deadlocks.
+  3. *Unbounded Database Growth*: High-frequency scheduler and message operations in SQLite WAL mode could cause write-ahead log (`.db-wal`) bloat without scheduled truncation.
+- **Decision Made**:
+  1. **Provider Resilient Fetch (`createResilientFetch`)**: Wrapped model API calls with randomized exponential backoff and jitter for transient codes (`429`, `503`, `502`, `529`), RFC 7231 `Retry-After` header parsing, and fail-closed rate limit formatting with a direct **"🔑 Switch Provider"** UI button.
+  2. **Active Process Teardown & Deadlock Prevention**: Propagated `AbortSignal` through `SandboxExecutionOptions`, `BwrapDriver`, and `DirectFallbackDriver` (`SIGTERM` -> `SIGKILL`). Added `forceReleaseSeat()` and abort waiter unlinking in `lib/computer/jail.ts`. Ensured browser automation tabs close on request cancellation.
+  3. **SQLite WAL Checkpointing**: Set `database.pragma("wal_autocheckpoint = 1000")`, exported `checkpointWal()` helper, and configured an unreferenced background interval timer to truncate WAL journals during sustained usage.
+  4. **Turbopack & Next.js 16 Optimization**: Suppressed dynamic filesystem root tracing with `/*turbopackIgnore: true*/` in `lib/computer/sandbox.ts` and migrated to native `proxy.ts`.
+- **Rationale**:
+  Hardening existing features ensures high reliability, clean container operation, and zero unhandled resource leaks in production environments before expanding new feature sets.
+- **Consequences & System Impact**:
+  Production builds complete with 0 warnings or errors in ~1s. The system gracefully absorbs transient provider rate limits, aborts long-running agent processes cleanly without zombies or deadlocks, and maintains bounded disk usage.
+
+

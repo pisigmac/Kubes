@@ -86,16 +86,32 @@ export async function browse(
   name: string,
   rawUrl: string,
   orgId = "default",
+  abortSignal?: AbortSignal,
 ): Promise<{ title: string; text: string; url: string }> {
   const url = await assertPublicUrl(rawUrl);
   return withSeat(name, async () => {
+    if (abortSignal?.aborted) throw new Error("Operation aborted.");
     const current = await screen(orgId);
-    await current.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
-    const title = await current.title();
-    const text = await current.evaluate(() => document.body?.innerText?.slice(0, 8000) ?? "");
-    await shot(current, orgId);
-    return { title, text, url: current.url() };
-  });
+    const abortHandler = () => {
+      try {
+        void current.close().catch(() => {});
+      } catch {}
+    };
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", abortHandler, { once: true });
+    }
+    try {
+      await current.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 20_000 });
+      const title = await current.title();
+      const text = await current.evaluate(() => document.body?.innerText?.slice(0, 8000) ?? "");
+      await shot(current, orgId);
+      return { title, text, url: current.url() };
+    } finally {
+      if (abortSignal) {
+        abortSignal.removeEventListener("abort", abortHandler);
+      }
+    }
+  }, abortSignal);
 }
 
 export async function clickPage(name: string, target: string, orgId = "default"): Promise<string> {

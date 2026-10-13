@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAuthMode, validateDeskIDToken } from "./lib/auth/deskid.ts";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const authMode = getAuthMode();
   if (authMode !== "deskid") {
     // Single-user desktop mode: pass through seamlessly

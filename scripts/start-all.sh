@@ -9,15 +9,6 @@ LOG_DIR="${ROOT_DIR}/data/logs"
 
 mkdir -p "${PID_DIR}" "${LOG_DIR}"
 
-if [[ "${1:-}" == "--docker" ]]; then
-  echo "🚀 Starting Kubes stack via Docker Compose..."
-  docker compose up -d
-  echo "✅ Kubes stack started."
-  echo "🌐 Web UI: http://localhost:3000"
-  echo "🤖 Agent Core: http://localhost:8000"
-  exit 0
-fi
-
 # Resolve port-alloc CLI helper
 PORT_ALLOC_BIN="$(command -v port-alloc 2>/dev/null || ( [[ -x "${HOME}/.local/bin/port-alloc" ]] && echo "${HOME}/.local/bin/port-alloc" ) || true)"
 
@@ -30,6 +21,17 @@ allocate_service_port() {
     echo "${preferred}"
   fi
 }
+
+if [[ "${1:-}" == "--docker" ]]; then
+  echo "🚀 Starting Kubes stack via Docker Compose..."
+  DOCKER_WEB_PORT=$(allocate_service_port "kubes-web" 3000)
+  DOCKER_AGENT_PORT=$(allocate_service_port "kubes-agent-core" 8000)
+  KUBES_WEB_PORT="${DOCKER_WEB_PORT}" KUBES_AGENT_CORE_PORT="${DOCKER_AGENT_PORT}" docker compose up -d
+  echo "✅ Kubes stack started."
+  echo "🌐 Web UI: http://localhost:${DOCKER_WEB_PORT}"
+  echo "🤖 Agent Core: http://localhost:${DOCKER_AGENT_PORT}"
+  exit 0
+fi
 
 WEB_PORT=$(allocate_service_port "kubes-web" 3000)
 AGENT_CORE_PORT=$(allocate_service_port "kubes-agent-core" 8000)

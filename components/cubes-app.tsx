@@ -298,6 +298,7 @@ export function CubesApp({
               });
             }}
             onComputer={(slug) => void showComputer(slug)}
+            onOpenProviders={() => setProviderOpen(true)}
           />
         ) : (
           <div className="flex-1" />

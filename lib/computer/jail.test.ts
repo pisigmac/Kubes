@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   ensureWorkspace,
   execCommand,
+  forceReleaseSeat,
   readRootFor,
   readText,
   resolveInside,
@@ -133,5 +134,44 @@ test("computerTools honors safeMode and approved lists", async () => {
   const autoWriteTool = autoTools.computer_write as { execute: (input: { path: string; text: string }) => Promise<Record<string, unknown>> };
   const autoWriteAllowed = await autoWriteTool.execute({ path: "notes/auto.md", text: "auto" });
   assert.equal(autoWriteAllowed.ok, true);
+});
+
+test("withSeat handles abort signals cleanly without leaking seats or waiters", async () => {
+  // Pre-aborted signal should reject immediately and not hold seat
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(withSeat("PreAborted", async () => "ok", preAborted.signal), /aborted/i);
+  assert.equal(seatHolder(), null);
+
+  // Seat is acquired by Cube A
+  let releaseA: (() => void) | undefined;
+  const aAcquired = new Promise<void>((resolve) => {
+    void withSeat("HolderA", async () => {
+      resolve();
+      await new Promise<void>((done) => {
+        releaseA = done;
+      });
+    });
+  });
+  await aAcquired;
+  assert.equal(seatHolder(), "HolderA");
+
+  // Cube B queues with an AbortSignal and aborts while waiting
+  const abortB = new AbortController();
+  const bPromise = withSeat("WaiterB", async () => "ok", abortB.signal);
+  abortB.abort();
+  await assert.rejects(bPromise, /aborted/i);
+
+  // When A releases, seat should become free because B was removed
+  releaseA?.();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(seatHolder(), null);
+
+  // forceReleaseSeat resets any lingering seat holder
+  await withSeat("Temporary", async () => {
+    assert.equal(seatHolder(), "Temporary");
+    forceReleaseSeat();
+    assert.equal(seatHolder(), null);
+  });
 });
 

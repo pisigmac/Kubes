@@ -40,6 +40,7 @@ export type Actor = {
   safeMode?: boolean;
   approvedCommands?: string[];
   approvedWrites?: string[];
+  abortSignal?: AbortSignal;
 };
 
 function failed(error: unknown): { ok: false; summary: string } {
@@ -75,7 +76,7 @@ export function computerTools(actor: Actor) {
           };
         }
         try {
-          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command, orgId);
+          const result = await execCommand(actor.slug, actor.isMaestro, actor.name, command, orgId, actor.abortSignal);
           const summary = `Ran \`${command.slice(0, 80)}\` (${result.exitCode ?? "stopped"})`;
           return { ok: result.exitCode === 0, summary, ...result };
         } catch (error) {
@@ -153,7 +154,7 @@ export function computerTools(actor: Actor) {
       execute: async ({ url }) => {
         try {
           assertToolAllowed(actor.slug, "computer_browse");
-          const page = await browse(actor.name, url, orgId);
+          const page = await browse(actor.name, url, orgId, actor.abortSignal);
           return { ok: true, summary: `Opened ${page.url}`, ...page };
         } catch (error) {
           return failed(error);

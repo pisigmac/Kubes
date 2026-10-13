@@ -14,6 +14,7 @@ import {
   createSwarmPlan,
 } from "./swarm.ts";
 import { synthesizeSwarmPlan } from "./synthesizer.ts";
+import { isRateLimitOrQuotaError } from "../ai/provider.ts";
 import type { ResourceScope } from "../auth/deskid.ts";
 
 export type SwarmRunnerEvent =
@@ -156,7 +157,10 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
         });
       } catch (err) {
         const durationMs = Date.now() - startTime;
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        let errorMessage = err instanceof Error ? err.message : String(err);
+        if (isRateLimitOrQuotaError(err)) {
+          errorMessage = `[Rate Limit] Specialist '${taskDef.assignedCube}' reached provider quota limits. Consider switching to another provider in the header.`;
+        }
 
         currentPlan = updateTaskStatus(currentPlan, taskDef.id, {
           status: "failed",

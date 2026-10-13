@@ -201,30 +201,58 @@ export function rememberCommand(record: CommandRecord): void {
   }
 }
 
-export async function withSeat<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  const release = await acquire(name);
+export async function withSeat<T>(name: string, fn: () => Promise<T>, abortSignal?: AbortSignal): Promise<T> {
+  const release = await acquire(name, abortSignal);
   try {
+    if (abortSignal?.aborted) {
+      throw new Error("Operation aborted.");
+    }
     return await fn();
   } finally {
     release();
   }
 }
 
-function acquire(name: string): Promise<() => void> {
+function acquire(name: string, abortSignal?: AbortSignal): Promise<() => void> {
+  if (abortSignal?.aborted) {
+    return Promise.reject(new Error("Operation aborted."));
+  }
   if (!holder) {
     holder = { name };
     return Promise.resolve(releaseSeat);
   }
   return new Promise((resolve, reject) => {
+    const waiterRef: { timer: NodeJS.Timeout | null } = { timer: null };
+    const cleanup = () => {
+      if (waiterRef.timer) clearTimeout(waiterRef.timer);
+      const index = waiters.findIndex((waiter) => waiter.timer === waiterRef.timer);
+      if (index >= 0) waiters.splice(index, 1);
+    };
+
+    const abortHandler = () => {
+      cleanup();
+      reject(new Error("Operation aborted while waiting for computer seat."));
+    };
+
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", abortHandler, { once: true });
+    }
+
     const timer = setTimeout(() => {
+      if (abortSignal) abortSignal.removeEventListener("abort", abortHandler);
       const index = waiters.findIndex((waiter) => waiter.timer === timer);
       if (index >= 0) waiters.splice(index, 1);
       reject(new Error(`Computer is in use by ${holder?.name ?? "another Cube"}.`));
     }, seatWaitMs());
+    waiterRef.timer = timer;
+
     waiters.push({
       name,
       timer,
-      grant: () => resolve(releaseSeat),
+      grant: () => {
+        if (abortSignal) abortSignal.removeEventListener("abort", abortHandler);
+        resolve(releaseSeat);
+      },
     });
   });
 }
@@ -240,22 +268,34 @@ function releaseSeat(): void {
   next.grant();
 }
 
+export function forceReleaseSeat(): void {
+  holder = null;
+  const next = waiters.shift();
+  if (next) {
+    clearTimeout(next.timer);
+    holder = { name: next.name };
+    next.grant();
+  }
+}
+
 export async function execCommand(
   slug: string,
   isMaestro: boolean,
   name: string,
   command: string,
   orgId = "default",
+  abortSignal?: AbortSignal,
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
   const root = ensureWorkspace(slug, isMaestro, orgId);
   assertCommand(command, root);
-  return withSeat(name, () => runBash(root, slug, command));
+  return withSeat(name, () => runBash(root, slug, command, abortSignal), abortSignal);
 }
 
 async function runBash(
   root: string,
   slug: string,
   command: string,
+  abortSignal?: AbortSignal,
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string; driver?: string }> {
   const driver = getSandboxDriver();
   const { getCubePolicy } = await import("../cubes/policy.ts");
@@ -267,6 +307,7 @@ async function runBash(
     command,
     timeoutMs: EXEC_MS,
     networkEgress: policy.network_egress,
+    abortSignal,
   });
   rememberCommand({ at: new Date().toISOString(), slug, command, ...result });
   return result;

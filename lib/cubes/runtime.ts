@@ -313,7 +313,7 @@ function buildCubeAgent(
   options: { handoff: boolean; manage: boolean },
   providerKey?: string,
   providerId?: string,
-  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
 ) {
   const orgId = cube.orgId || "default";
   const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
@@ -330,6 +330,7 @@ function buildCubeAgent(
         safeMode: approvalOptions?.safeMode,
         approvedCommands: approvalOptions?.approvedCommands,
         approvedWrites: approvalOptions?.approvedWrites,
+        abortSignal: approvalOptions?.abortSignal,
       }),
       ...scheduleTools(cube),
       ...(options.handoff ? { handoff: handoffTool(cube) } : {}),
@@ -343,7 +344,7 @@ export function buildMaestroAgent(
   cube: Cube,
   providerKey?: string,
   providerId?: string,
-  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
 ) {
   return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId, approvalOptions);
 }
@@ -352,7 +353,7 @@ export function buildSpecialistAgent(
   cube: Cube,
   providerKey?: string,
   providerId?: string,
-  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[] },
+  approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
 ) {
   return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId, approvalOptions);
 }
@@ -362,7 +363,7 @@ export async function runCubeInstruction(
   instruction: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const agent = buildCubeAgent(cube, { handoff: false, manage: false });
+  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, undefined, undefined, { abortSignal: signal });
   const result = await agent.generate({ prompt: instruction, abortSignal: signal });
   return result.text;
 }

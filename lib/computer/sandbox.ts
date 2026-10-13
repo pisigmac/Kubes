@@ -69,6 +69,7 @@ export interface SandboxExecutionOptions {
   timeoutMs: number;
   env?: Record<string, string>;
   networkEgress?: "none" | "restricted" | "full";
+  abortSignal?: AbortSignal;
 }
 
 export interface SandboxResult {
@@ -99,11 +100,11 @@ class UnavailableSandboxDriver implements SandboxDriver {
 function getBwrapBaseArgs(): string[] {
   const args: string[] = ["--ro-bind", "/usr", "/usr"];
   for (const dir of ["/bin", "/lib", "/lib64", "/sbin", "/lib32", "/libx32"]) {
-    if (!fs.existsSync(dir)) continue;
+    if (!fs.existsSync(/*turbopackIgnore: true*/ dir)) continue;
     try {
-      const stat = fs.lstatSync(dir);
+      const stat = fs.lstatSync(/*turbopackIgnore: true*/ dir);
       if (stat.isSymbolicLink()) {
-        const target = fs.readlinkSync(dir);
+        const target = fs.readlinkSync(/*turbopackIgnore: true*/ dir);
         args.push("--symlink", target, dir);
       } else if (stat.isDirectory()) {
         args.push("--ro-bind", dir, dir);
@@ -112,7 +113,7 @@ function getBwrapBaseArgs(): string[] {
       // Ignore directory check failures
     }
   }
-  if (fs.existsSync("/etc/resolv.conf")) {
+  if (fs.existsSync(/*turbopackIgnore: true*/ "/etc/resolv.conf")) {
     args.push("--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf");
   }
   return args;
@@ -169,11 +170,31 @@ export class BwrapDriver implements SandboxDriver {
 
       args.push("--die-with-parent", "bash", "-c", options.command);
 
+      const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+      const combinedSignal = options.abortSignal
+        ? AbortSignal.any([timeoutSignal, options.abortSignal])
+        : timeoutSignal;
+
       const child = spawn("bwrap", args, {
         cwd: options.root,
         env: sanitizeSandboxEnv(options.env, options.root),
-        signal: AbortSignal.timeout(options.timeoutMs),
+        signal: combinedSignal,
       });
+
+      const abortHandler = () => {
+        try {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }, 1000).unref();
+        } catch {}
+      };
+
+      if (options.abortSignal) {
+        options.abortSignal.addEventListener("abort", abortHandler, { once: true });
+      }
 
       const take = (chunk: Buffer, current: string) => {
         return (current + chunk.toString("utf8")).slice(-OUTPUT_CAP);
@@ -186,11 +207,13 @@ export class BwrapDriver implements SandboxDriver {
         stderr = take(chunk, stderr);
       });
       child.on("error", (error: Error) => {
+        if (options.abortSignal) options.abortSignal.removeEventListener("abort", abortHandler);
         if (settled) return;
         settled = true;
         reject(error);
       });
       child.on("close", (code: number | null) => {
+        if (options.abortSignal) options.abortSignal.removeEventListener("abort", abortHandler);
         if (settled) return;
         settled = true;
         resolve({ exitCode: code, stdout, stderr, driver: "bwrap" });
@@ -274,11 +297,31 @@ export class DirectFallbackDriver implements SandboxDriver {
       let stderr = "";
       let settled = false;
 
+      const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+      const combinedSignal = options.abortSignal
+        ? AbortSignal.any([timeoutSignal, options.abortSignal])
+        : timeoutSignal;
+
       const child = spawn("bash", ["-c", options.command], {
         cwd: options.root,
         env: sanitizeSandboxEnv(options.env, options.root),
-        signal: AbortSignal.timeout(options.timeoutMs),
+        signal: combinedSignal,
       });
+
+      const abortHandler = () => {
+        try {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }, 1000).unref();
+        } catch {}
+      };
+
+      if (options.abortSignal) {
+        options.abortSignal.addEventListener("abort", abortHandler, { once: true });
+      }
 
       const take = (chunk: Buffer, current: string) => {
         return (current + chunk.toString("utf8")).slice(-OUTPUT_CAP);
@@ -291,11 +334,13 @@ export class DirectFallbackDriver implements SandboxDriver {
         stderr = take(chunk, stderr);
       });
       child.on("error", (error: Error) => {
+        if (options.abortSignal) options.abortSignal.removeEventListener("abort", abortHandler);
         if (settled) return;
         settled = true;
         reject(error);
       });
       child.on("close", (code: number | null) => {
+        if (options.abortSignal) options.abortSignal.removeEventListener("abort", abortHandler);
         if (settled) return;
         settled = true;
         resolve({ exitCode: code, stdout, stderr, driver: "direct" });

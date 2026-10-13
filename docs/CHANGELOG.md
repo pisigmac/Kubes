@@ -2,6 +2,17 @@
 
 All notable changes to the Kubes Autonomous AI Platform are documented in this file.
 
+## [1.5.0] - 2026-10-13
+
+### Added
+- **AI Provider Resilience & Exponential Backoff (`lib/ai/provider.ts`)**: Built `createResilientFetch` with randomized exponential backoff and jitter for transient `429`, `503`, `502`, and `529` provider responses; added RFC 7231 `Retry-After` header parsing; implemented provider rate limit formatting for specialist swarm tasks; enhanced `CubeChat` UI error banner with direct **"🔑 Switch Provider"** action button.
+- **Swarm & Process Teardown Resilience (`lib/computer/sandbox.ts`, `lib/computer/jail.ts`, `lib/computer/browser.ts`)**: Active abort propagation across `SandboxExecutionOptions`, `BwrapDriver`, and `DirectFallbackDriver` with `AbortSignal.any()` combining execution timeouts and user cancellations (`SIGTERM` -> `SIGKILL`); automated seat deadlock prevention with `forceReleaseSeat()` and clean waiter unlinking; immediate active Chromium tab closure upon request abort.
+- **First-Time Guided Onboarding & Composite Starter Pills (`components/transcript.tsx`, `components/cube-chat.tsx`)**: Empty state guided onboarding card when workspaces lack provider keys, explaining free Gemini/Groq options with one-click CTA; composite workflow starter pills for Maestro (Berlin Relocation Plan, Tech Stack Decision, Monthly Financial Audit) and domain-tailored prompts for specialists.
+- **Operational & Container Deployment Hardening (`lib/db.ts`, `docker-compose.yml`, `scripts/start-all.sh`)**: Automated SQLite WAL checkpointing (`wal_autocheckpoint = 1000`, exported `checkpointWal()`, and periodic unreferenced WAL truncation timer); dynamic non-colliding host port mapping in `docker-compose.yml` (`KUBES_WEB_PORT`, `KUBES_AGENT_CORE_PORT`) and `scripts/start-all.sh --docker` via `port-alloc`.
+- **Turbopack Build & Next.js 16 Framework Optimization (`lib/computer/sandbox.ts`, `proxy.ts`)**: Added `/*turbopackIgnore: true*/` annotations inside `getBwrapBaseArgs()` to eliminate filesystem root tracing warnings; migrated from deprecated `middleware.ts` to Next.js 16 `proxy.ts`.
+
+---
+
 ## [1.4.0] - 2026-10-13
 
 ### Added

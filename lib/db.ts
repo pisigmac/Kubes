@@ -206,17 +206,47 @@ function seed(database: Database.Database) {
   write();
 }
 
+export function checkpointWal(database?: Database.Database): { busy: number; log: number; checkpointed: number } {
+  const target = database || globalForDb.cubesDb;
+  if (!target) return { busy: 0, log: 0, checkpointed: 0 };
+  try {
+    const result = target.pragma("wal_checkpoint(TRUNCATE)") as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>;
+    return result?.[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+  } catch (error) {
+    console.warn("Failed to checkpoint SQLite WAL:", error);
+    return { busy: 1, log: 0, checkpointed: 0 };
+  }
+}
+
+const CHECKPOINT_INTERVAL_MS = 15 * 60 * 1000;
+let checkpointTimer: NodeJS.Timeout | null = null;
+
 export function db(): Database.Database {
   if (!globalForDb.cubesDb) {
     const dir = path.join(process.cwd(), "data");
     fs.mkdirSync(dir, { recursive: true });
     const database = new Database(path.join(dir, "cubes.db"));
     database.pragma("journal_mode = WAL");
+    database.pragma("wal_autocheckpoint = 1000");
     database.pragma("foreign_keys = ON");
     database.pragma("busy_timeout = 5000");
     migrate(database);
     seed(database);
     globalForDb.cubesDb = database;
+
+    if (!checkpointTimer) {
+      checkpointTimer = setInterval(() => {
+        if (globalForDb.cubesDb) {
+          checkpointWal(globalForDb.cubesDb);
+        }
+      }, CHECKPOINT_INTERVAL_MS);
+      checkpointTimer.unref();
+    }
+
     queueMicrotask(() => {
       void import("./computer/schedule.ts").then((mod) => mod.startScheduler());
     });

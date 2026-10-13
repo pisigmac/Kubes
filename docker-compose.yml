@@ -8,7 +8,7 @@ services:
     container_name: kubes-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${KUBES_WEB_PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.x.ai/v1}
@@ -36,7 +36,7 @@ services:
     container_name: kubes-agent-core
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${KUBES_AGENT_CORE_PORT:-8000}:8000"
     environment:
       - PYTHONUNBUFFERED=1
       - KUBEMIND_ENABLED=${KUBEMIND_ENABLED:-false}

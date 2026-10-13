@@ -277,14 +277,139 @@ function normalizeGeminiStream(response: Response): Response {
   });
 }
 
-function providerFetch(providerId: ProviderId): typeof fetch | undefined {
-  if (providerId !== "gemini") return undefined;
-  return async (input, init) => {
-    const response = await fetch(input, init);
-    return response.headers.get("content-type")?.includes("text/event-stream")
-      ? normalizeGeminiStream(response)
-      : response;
+export interface ResilientFetchOptions {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffFactor?: number;
+  fetchFn?: typeof fetch;
+}
+
+export function isRateLimitOrQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("quota") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("too many requests")
+  );
+}
+
+export function formatProviderErrorMessage(error: unknown, providerId?: string): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  const providerLabel = providerId ? `[${providerId}] ` : "";
+
+  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid_api_key")) {
+    return `${providerLabel}API key is invalid or expired. Please configure a valid key in the 🔑 Providers modal.`;
+  }
+  if (isRateLimitOrQuotaError(error)) {
+    return `${providerLabel}Provider rate limit or quota exceeded. Please switch to a free fallback provider or retry shortly.`;
+  }
+  if (lower.includes("503") || lower.includes("529") || lower.includes("overloaded") || lower.includes("service unavailable")) {
+    return `${providerLabel}Provider service is temporarily overloaded (503/529). Please retry shortly.`;
+  }
+  return msg;
+}
+
+export function parseRetryAfterMs(headerValue: string | null): number | null {
+  if (!headerValue || !headerValue.trim()) return null;
+  const trimmed = headerValue.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed) * 1000;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isNaN(dateMs)) {
+    const diff = dateMs - Date.now();
+    return diff > 0 ? diff : 0;
+  }
+  return null;
+}
+
+function sleepWithSignal(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(signal.reason ?? new Error("Operation aborted"));
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("Operation aborted"));
+    };
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+}
+
+export function createResilientFetch(
+  providerId: ProviderId,
+  options?: ResilientFetchOptions,
+): typeof fetch {
+  const maxRetries = options?.maxRetries ?? 3;
+  const initialDelayMs = options?.initialDelayMs ?? 400;
+  const maxDelayMs = options?.maxDelayMs ?? 6000;
+  const backoffFactor = options?.backoffFactor ?? 2;
+  const customFetch = options?.fetchFn ?? fetch;
+
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let attempt = 0;
+    while (true) {
+      if (init?.signal?.aborted) {
+        throw (init.signal.reason ?? new Error("Request aborted."));
+      }
+
+      let response: Response;
+      try {
+        response = await customFetch(input, init);
+      } catch (networkError) {
+        if (init?.signal?.aborted) {
+          throw networkError;
+        }
+        if (attempt < maxRetries) {
+          attempt++;
+          const jitter = Math.random() * 200;
+          const delay = Math.min(maxDelayMs, initialDelayMs * Math.pow(backoffFactor, attempt - 1) + jitter);
+          await sleepWithSignal(delay, init?.signal);
+          continue;
+        }
+        throw networkError;
+      }
+
+      const status = response.status;
+      const isTransient = status === 429 || status === 503 || status === 502 || status === 529;
+
+      if (isTransient && attempt < maxRetries) {
+        attempt++;
+        const retryAfterHeader = response.headers.get("retry-after");
+        const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+        const jitter = Math.random() * 200;
+        const delay = retryAfterMs !== null
+          ? Math.min(maxDelayMs, retryAfterMs)
+          : Math.min(maxDelayMs, initialDelayMs * Math.pow(backoffFactor, attempt - 1) + jitter);
+
+        await sleepWithSignal(delay, init?.signal);
+        continue;
+      }
+
+      if (providerId === "gemini" && response.headers.get("content-type")?.includes("text/event-stream")) {
+        return normalizeGeminiStream(response);
+      }
+
+      return response;
+    }
   };
+}
+
+export function providerFetch(providerId: ProviderId): typeof fetch | undefined {
+  return createResilientFetch(providerId);
 }
 
 const runtimeKeys = new Map<string, string>();
@@ -564,7 +689,7 @@ export function languageModel(modelId: string, explicitApiKey?: string, explicit
     baseURL: resolved.baseURL,
     headers: resolved.headers,
     name: `kubes-${resolved.providerId}`,
-    fetch: providerFetch(resolved.providerId),
+    fetch: createResilientFetch(resolved.providerId),
   });
 
   return provider.chat(resolved.modelId);

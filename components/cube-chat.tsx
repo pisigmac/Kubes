@@ -17,6 +17,7 @@ export function CubeChat({
   initialMessages,
   onCubesChanged,
   onComputer,
+  onOpenProviders,
 }: {
   cube: Cube;
   cubes: Cube[];
@@ -24,6 +25,7 @@ export function CubeChat({
   initialMessages: UIMessage[];
   onCubesChanged: () => void;
   onComputer: (slug: string | null) => void;
+  onOpenProviders?: () => void;
 }) {
   const [input, setInput] = useState("");
   const [lastPrompt, setLastPrompt] = useState<string>("");
@@ -261,6 +263,14 @@ export function CubeChat({
               onViewArtifact={(artifact) => setActiveArtifact(artifact)}
               onApproveAction={handleApproveAction}
               onDenyAction={handleDenyAction}
+              providerReady={providerReady}
+              onOpenProviders={onOpenProviders}
+              onSelectPrompt={(text) => {
+                setInput(text);
+                if (text.startsWith("Create a complete Berlin") || text.startsWith("Compare Next.js") || text.startsWith("Conduct a monthly") || cube.isMaestro) {
+                  setSwarmMode(true);
+                }
+              }}
             />
           </ErrorBoundary>
           {swarmPlan ? (
@@ -324,13 +334,24 @@ export function CubeChat({
           {error || swarmError ? (
             <div className="mb-3 flex items-center justify-between rounded-xl border border-red-500/30 bg-red-950/25 px-4 py-2.5 text-xs text-red-200">
               <span className="truncate">{error?.message || swarmError || "Streaming error occurred."}</span>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="ml-3 shrink-0 rounded-lg bg-red-800/40 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700/50"
-              >
-                Retry
-              </button>
+              <div className="ml-3 flex shrink-0 items-center gap-2">
+                {onOpenProviders ? (
+                  <button
+                    type="button"
+                    onClick={onOpenProviders}
+                    className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-2.5 py-1 text-xs font-medium text-amber-200 hover:bg-amber-900/50"
+                  >
+                    🔑 Switch Provider
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="rounded-lg bg-red-800/40 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700/50"
+                >
+                  Retry
+                </button>
+              </div>
             </div>
           ) : null}
 
