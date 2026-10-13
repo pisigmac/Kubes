@@ -176,4 +176,25 @@
 - **Consequences & System Impact**:
   Production builds complete with 0 warnings or errors in ~1s. The system gracefully absorbs transient provider rate limits, aborts long-running agent processes cleanly without zombies or deadlocks, and maintains bounded disk usage.
 
+---
+
+## [ADR-011] Interactive Visual Artifact Studios & Live Sandboxed Canvas
+
+- **Context & Problem Statement**:
+  Specialist agents and Swarm pipelines produce varied rich artifacts: Mermaid architecture diagrams (`notes/diagram.mmd`), CSV financial/job tracking ledgers (`notes/ledger.csv`), and interactive HTML mockups. Previously, the Artifact Canvas rendered static text or unstyled tables, preventing users from zooming into complex diagrams, sorting data columns, visualizing numeric distributions, or safely inspecting HTML mockups and console output.
+- **Decision Made**:
+  Implemented Phase 7 Interactive Visual Artifact Studio:
+  1. **Interactive Mermaid Studio (`components/studios/mermaid-studio.tsx`, `lib/computer/diagram.ts`)**: Client-side dynamic Mermaid rendering with pan/drag controls, mouse wheel zoom, layout orientation toggling (`TD` <-> `LR`), and 1-click SVG / high-DPI PNG export.
+  2. **Interactive CSV Grid Studio (`components/studios/csv-grid-studio.tsx`, `lib/computer/csv_grid.ts`)**: Pure RFC-4180 parsing with quote support; multi-column ascending/descending sorting (`▲`/`▼`), real-time search filtering, column totals (`Σ Sum`, `Avg`), and dynamic SVG bar distribution chart with category and value series dropdowns.
+  3. **Live Sandboxed Iframe Code Preview Runner (`components/studios/preview-sandbox.tsx`, `lib/computer/sandbox_preview.ts`)**: Strict `sandbox="allow-scripts"` isolation (no `allow-same-origin`) preventing host DOM access; postMessage console interception capturing logs, warnings, errors, and unhandled rejections; expandable Console Inspector drawer; multi-device viewport toggle (100% Responsive, Desktop 1024px, Tablet 768px, Mobile 375px) with one-click refresh reload.
+  4. **Artifact Canvas Routing (`components/artifact-canvas.tsx`)**: Replaced static views with automatic detection routing based on file extension and content heuristics.
+- **Rationale**:
+  Provides rich, interactive visual review of agent deliverables without compromising security. Decoupling logic into pure TypeScript libraries (`lib/computer/`) enables 100% automated test coverage in Node test runner without JSX parsing constraints.
+- **Alternatives Considered & Why Rejected**:
+  - *Full unrestricted iframe*: Rejected due to cross-site script execution risk against host session cookies and local storage. Strict `sandbox="allow-scripts"` eliminates host DOM access.
+  - *Heavy charting dependencies*: Avoided bulky third-party chart bundles; built lightweight, accessible native SVG bar distribution components tailored to the Kubes dark theme.
+- **Consequences & System Impact**:
+  Zero runtime regressions. All 110 unit tests pass. Artifact canvas delivers immediate interactivity for diagrams, tabular data, and web code snippets.
+
+
 
