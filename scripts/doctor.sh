@@ -16,10 +16,19 @@ check_cmd() {
   local name="$1"
   local cmd="$2"
   local required="$3"
+  local version_arg="${4:---version}"
   if command -v "$cmd" >/dev/null 2>&1; then
-    local ver
-    ver="$("$cmd" --version 2>&1 | head -n 1 || echo "installed")"
-    echo "  🟢 [OK] ${name}: ${ver}"
+    local version_output
+    if version_output="$("$cmd" "$version_arg" 2>&1)"; then
+      local ver="${version_output%%$'\n'*}"
+      echo "  🟢 [OK] ${name}: ${ver}"
+    elif [[ "$required" == "true" ]]; then
+      echo "  🔴 [ERROR] ${name} ('${cmd}') was found but its version check failed."
+      ERRORS=$((ERRORS + 1))
+    else
+      echo "  🟡 [WARN] ${name} ('${cmd}') was found but its version check failed."
+      WARNINGS=$((WARNINGS + 1))
+    fi
   else
     if [[ "$required" == "true" ]]; then
       echo "  🔴 [ERROR] ${name} ('${cmd}') is required but not found in PATH."
@@ -43,7 +52,7 @@ check_cmd "Bubblewrap (bwrap sandbox)" "bwrap" "false"
 check_cmd "Google Chrome / Chromium" "google-chrome" "false"
 check_cmd "SQLite CLI" "sqlite3" "false"
 check_cmd "curl" "curl" "true"
-check_cmd "lsof" "lsof" "true"
+check_cmd "lsof" "lsof" "true" "-v"
 
 echo ""
 echo "3. Directory & Data Structure Permissions:"

@@ -77,6 +77,8 @@
 
 ## [ADR-006] Browser-Local Provider Readiness
 
+> **Status: Superseded by ADR-014.** This entry records the previous browser-local credential decision for historical context only. ADR-014 is the current architecture direction.
+
 - **Context & Problem Statement**:
   Provider keys are intentionally not persisted on the server, but chat requests need a verified browser-local key. Previously, provider selection and verification state were implicit, and the Configure/Test controls could leave chat without a reliable readiness signal.
 - **Decision Made**:
@@ -320,6 +322,29 @@
 - **Consequences & System Impact**:
   Zero breaking changes to existing repositories. Non-destructive updater if run on an existing workspace.
 
+
+## [ADR-014] DeskID-Scoped Personal Provider Credentials
+
+- **Date**: 2026-10-21
+- **Status**: Accepted architecture direction; implementation pending.
+- **Context & Problem Statement**:
+  The current provider flow stores API keys and verification state in browser `localStorage`, sends keys from the browser with chat and swarm requests, and keeps runtime provider keys and active selection in process-global memory. This does not support safe account-level persistence across devices and can blur boundaries between users on a shared server. The product uses DeskID login, and the agreed current model is one user in one organization.
+- **Decision Made**:
+  1. Provider credentials and provider preferences are personal to the authenticated DeskID user and scoped to that user's organization.
+  2. Personal settings persist server-side and sync across the user's devices after authentication. The browser must not persist provider key values; it may retain non-secret UI state only when appropriate.
+  3. The server stores credentials encrypted at rest, resolves them only from the authenticated user and organization context, and uses them for that user's provider requests. Every credential operation must enforce both user and organization scope and fail closed when either scope is absent or mismatched.
+  4. Provider keys must not be returned to the browser after submission, included in chat or swarm request payloads, exposed to other users, or readable by organization administrators. Administrative controls must not reveal or retrieve personal key values.
+  5. Future organization policy is a separate layer. Administrators may allow-list providers, require an approved gateway, and decide whether personal credentials may pass through that gateway or whether credentials must be gateway-managed. Policy may allow or disable personal key use, but does not transfer ownership or visibility of personal secrets to administrators.
+  6. The user experience must distinguish configured, verified, and active provider states; show which provider and model will handle a request; test actual chat capability rather than only model-list access; and explain policy blocks and recovery options.
+- **Rationale**:
+  DeskID provides the authenticated identity needed to associate credentials with their owner. User-and-organization scoping supports cross-device use while preserving tenant isolation. Keeping provider policy separate from credential ownership lets organizations constrain usage without granting administrators access to personal secrets.
+- **Alternatives Considered & Why Rejected**:
+  - *Browser `localStorage` as the persistent credential store*: Rejected because keys remain readable to scripts running in the application origin and do not provide a server-enforced account boundary.
+  - *Process-global runtime keys and provider selection*: Rejected because they are not user-scoped, are lost on restart, and can cause users to share effective provider state.
+  - *Organization-owned credentials as the default*: Rejected for the current product model; personal credentials are the default. Organization-managed credentials may be introduced later as a separate, explicitly labeled capability.
+  - *Administrator access to personal key values*: Rejected; future administrator controls govern provider usage policy, not secret retrieval.
+- **Consequences & System Impact**:
+  This decision supersedes ADR-006. Implementation will require a durable encrypted credential store, authenticated user-and-organization scoping for provider preferences and secrets, server-side provider resolution for chat and swarm execution, removal of key values from browser persistence and request payloads, and migration or re-entry handling for existing browser-local keys. Until those changes are implemented, the current code remains inconsistent with this target architecture and must not be described as providing account-synced credential storage.
 
 
 

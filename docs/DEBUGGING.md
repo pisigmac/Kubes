@@ -62,3 +62,26 @@
   3. Confirmed the server already had a bounded timeout, but that timeout did not guarantee immediate client status recovery.
 - **Resolution & Fix**: Added SDK finish/error callbacks and a guarded two-second client recovery that stops only when the latest message is an assistant response with text and no tool call is pending.
 - **Verification**: Run the UI test with a normal response and with a provider stream that omits its terminal event. The response remains visible and the composer returns to the ready state.
+
+## [DEBUG-006] Verification Blocked While Corepack Resolves Pinned pnpm
+
+- **Incident ID & Title**: `[DEBUG-006] Verification Blocked While Corepack Resolves Pinned pnpm`
+- **Symptoms & Error Messages**: On 2026-10-21, `make verify` stopped before running tests. Corepack first failed to create its default cache directory (`EROFS: read-only file system`), and when directed to a writable temporary cache it could not download the repository-pinned pnpm 11.17.0 (`getaddrinfo EAI_AGAIN registry.npmjs.org`).
+- **Root Cause**: The environment's default Corepack cache is read-only and outbound DNS/network access to the package registry is unavailable, while the pinned pnpm release is not cached for the installed Node.js runtime.
+- **Diagnostic Steps**:
+  1. Confirmed the installed Node.js runtime is v22.22.2 and the repository requests pnpm 11.17.0.
+  2. Ran `make verify`; Corepack failed before the test runner started while creating its default cache.
+  3. Retried the pnpm version resolution with `COREPACK_HOME` pointed at a writable temporary directory; Corepack then failed with `EAI_AGAIN` reaching the package registry.
+- **Resolution & Fix**: The failure was specific to the assistant's execution shell. A subsequent user-run `make verify` resolved pnpm successfully and reached the production audit; see `[DEBUG-007]` for the remaining blocker.
+- **Verification**: The user-provided run passed all four test runners, typecheck, and lint, then stopped at the production dependency audit. Browser E2E was not reached.
+
+## [DEBUG-007] Production Audit Finds Vulnerable KaTeX Dependency
+
+- **Incident ID & Title**: `[DEBUG-007] Production Audit Finds Vulnerable KaTeX Dependency`
+- **Symptoms & Error Messages**: The user-provided `make verify` output on 2026-10-21 reported one low-severity production advisory, `GHSA-238p-pmpm-9mq7`, and exited non-zero during `pnpm audit --prod`.
+- **Root Cause**: The dependency graph includes `katex@0.16.47` through Mermaid. The audit output identifies versions below `0.18.2` as vulnerable and `0.18.2` or later as patched.
+- **Diagnostic Steps**:
+  1. Reviewed the `pnpm audit --prod` output from the verification run.
+  2. Confirmed `pnpm-lock.yaml` resolves KaTeX to `0.16.47` through Mermaid.
+- **Resolution & Fix**: Added a pnpm workspace override for `katex@0.18.2` in `pnpm-workspace.yaml` and regenerated `pnpm-lock.yaml` with pnpm 11.17.0.
+- **Verification**: `pnpm audit --prod` reports no known vulnerabilities. The full `make verify` run passed all 138 tests, typecheck, lint, and audit. Browser E2E was skipped because the web server was stopped.

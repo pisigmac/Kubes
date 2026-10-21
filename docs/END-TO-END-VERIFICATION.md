@@ -1,15 +1,29 @@
 # Kubes End-to-End Verification & Subsystem Review
 
-## Executive Summary
+## Current Verification Snapshot — 2026-10-21
 
-This document records the complete end-to-end architectural review and test verification of the **Kubes** autonomous multi-agent platform. 
+This snapshot records the 2026-10-21 verification runs after pinning KaTeX to a patched version and clarifying E2E skip status. Earlier subsystem descriptions below are historical review notes and are not evidence of current passing status.
 
-The verification was conducted on branch `dev` and covers:
-- Complete quality assurance gate execution (`scripts/verify.sh` - **100% green pass rate**).
-- Multi-tenant data and process isolation across SQLite, Bubblewrap (`bwrap`), and headless Chromium.
-- Real-world dynamic port allocation under port collision conditions.
-- Automated end-to-end Puppeteer browser UI playbook testing all interactive workflows.
-- Turbopack production bundle compilation and REST API route inventory.
+| Check | Result | Evidence |
+| :--- | :--- | :--- |
+| `make doctor` | **PASS** | Node v22.22.2, pnpm 11.17.0, and required diagnostics were detected; zero errors and warnings. |
+| Main TypeScript tests | **PASS** | 114 passed, 0 failed. |
+| Port allocator TypeScript client | **PASS** | 1 passed, 0 failed. |
+| Python agent core tests | **PASS** | 17 passed. |
+| Python port allocator tests | **PASS** | 6 passed. |
+| TypeScript typecheck | **PASS** | Completed without errors. |
+| ESLint | **PASS** | Completed without errors. |
+| `pnpm audit --prod` | **PASS** | No known vulnerabilities found after the KaTeX override. |
+| Browser E2E, live-server run | **PASS** | All UI playbook interactions passed, including swarm controls. |
+| Browser E2E, simulated no-server run | **SKIPPED** | Health probes were temporarily made to report no server; the script identified the skip reason. |
+
+**Test total:** 138 passed across the four test runners above, with no test failures. The live-server `make verify` run passed all gates including E2E. The no-server simulation also passed the core gates and reported **Overall status: INCOMPLETE** because browser E2E was skipped.
+
+An earlier user-run attempt failed the production audit because KaTeX 0.16.47 was pulled in through Mermaid. The pnpm workspace override now resolves KaTeX 0.18.2. The verification runs used the locally installed pnpm 11.17.0.
+
+## Historical Review Notes
+
+The subsystem and UI review sections below preserve previously recorded claims. They have not been revalidated in the 2026-10-21 snapshot and should not be read as a current green verification report. The verification matrix below is also retained as historical evidence and is superseded by the dated snapshot above.
 
 ---
 
@@ -175,16 +189,7 @@ Route (app)                              Size     First Load JS
 
 ---
 
-## 7. Observations & Production Recommendations
+## 7. Superseded Recommendations
 
-1. **Next.js Proxy Migration**:
-   - *Observation*: Next.js 16 issues a deprecation warning: `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.`
-   - *Recommendation*: Schedule migration of `middleware.ts` to `proxy.ts` using `npx @next/codemod@canary middleware-to-proxy .`.
-
-2. **Sandbox Filesystem Tracing in Turbopack**:
-   - *Observation*: `lib/computer/sandbox.ts:42` dynamic check (`fs.existsSync(dir)` for `/bin`, `/lib`, `/usr`) triggers a build trace warning.
-   - *Recommendation*: Annotate the filesystem check with `/*turbopackIgnore: true*/` to optimize bundle tracing.
-
-3. **Background Process Disowning in `start-all.sh`**:
-   - *Observation*: When `scripts/start-all.sh` runs inside non-interactive or short-lived parent subshells, background jobs (`uvicorn`, `next dev`, `scheduler`) can receive SIGHUP upon parent shell termination.
-   - *Recommendation*: Ensure background invocations use `nohup ... & disown` for maximum daemon resilience.
+- The middleware-to-proxy migration recommendation is obsolete: the current checkout contains `proxy.ts`, and the changelog records the migration.
+- Older build and background-process recommendations in the historical report require fresh reproduction before being treated as current issues.

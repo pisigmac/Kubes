@@ -20,7 +20,7 @@ echo "3. Running Port Allocator Python Tests..."
 (cd "${ROOT_DIR}/tools/port-allocator" && uv run --with pytest pytest tests/)
 
 echo "4. Running TypeScript Static Typecheck..."
-npx tsc --noEmit
+pnpm exec tsc --noEmit
 
 echo "5. Running ESLint Quality Checks..."
 pnpm run lint
@@ -29,6 +29,8 @@ echo "6. Running Production Security Audit..."
 pnpm audit --prod
 
 echo "7. Running Automated E2E Browser Testing Suite..."
+E2E_STATUS="SKIPPED"
+E2E_SKIP_REASON=""
 CHROME_BIN="$(which google-chrome 2>/dev/null || which chromium 2>/dev/null || which chromium-browser 2>/dev/null || echo "")"
 if [ -n "${CHROME_BIN}" ]; then
   echo "✓ Found Chrome binary at ${CHROME_BIN}"
@@ -63,13 +65,20 @@ if [ -n "${CHROME_BIN}" ]; then
   if [ -n "${ACTIVE_WEB_PORT}" ]; then
     echo "✓ Web server detected on dynamic port ${ACTIVE_WEB_PORT}. Executing Puppeteer E2E tests..."
     PORT="${ACTIVE_WEB_PORT}" pnpm run test:ui
+    E2E_STATUS="PASS"
   else
-    echo "ℹ Web server is not running on an active port. Skipping live browser interaction pass (run 'make start' then 'make test-e2e')."
+    E2E_SKIP_REASON="web server is not running"
   fi
 else
-  echo "ℹ Chrome binary not detected on host. Skipping browser UI interaction pass."
+  E2E_SKIP_REASON="Chrome/Chromium is not installed"
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ All Quality Verification Gates Passed (100% Green)"
+if [ "${E2E_STATUS}" = "PASS" ]; then
+  echo "✅ All verification gates passed, including browser E2E."
+else
+  echo "✅ Core verification gates passed."
+  echo "⚠️ Browser E2E: SKIPPED (${E2E_SKIP_REASON}). Run 'make start' and then 'make test-e2e' to verify it."
+  echo "ℹ Overall status: INCOMPLETE (browser E2E was not run)."
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

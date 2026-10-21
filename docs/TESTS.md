@@ -5,8 +5,8 @@
 Kubes utilizes Node's native ESM test runner (`node --test`) coupled with `--experimental-strip-types` for fast, zero-transpilation test execution.
 
 ```
-Tests (75 Total Passing Tests across Stack)
-├── TypeScript Tests (51 passing, Node 22 ESM --experimental-strip-types)
+Test coverage (counts vary as suites change)
+├── TypeScript Tests (Node ESM --experimental-strip-types)
 │   ├── lib/computer/*.test.ts   # Jail, sandbox drivers, browser, cron, search, specialists, digests
 │   ├── lib/memory/*.test.ts     # Semantic & keyword memory persistence and scoring
 │   ├── lib/auth/*.test.ts       # DeskID token validation, JWKS caching, tenant negative isolation
@@ -14,17 +14,21 @@ Tests (75 Total Passing Tests across Stack)
 │   └── app/api/*.test.ts        # HTTP route authentication, RBAC gates, and cross-tenant API isolation
 ├── Port Allocator TS Client (1 passing)
 │   └── tools/port-allocator/tests/test_ts_client.test.ts
-├── Python LangGraph Agent Core (17 passing, uv run pytest)
+├── Python LangGraph Agent Core (uv run pytest)
 │   └── services/agent-core/tests/
-├── Port Allocator Python Core (6 passing, uv run pytest)
+├── Port Allocator Python Core (uv run pytest)
 │   └── tools/port-allocator/tests/
-└── End-to-End Headless Browser Playbook (8 UI phases passing)
+└── End-to-End Headless Browser Playbook (result depends on an available app server and Chrome)
     └── scripts/test-ui-play.ts (See docs/UI-TESTING.md)
 ```
 
 ---
 
 ## Test Execution Commands
+
+`make verify` labels browser E2E as **PASS** when it runs successfully. If Chrome or the web server is unavailable, it labels E2E **SKIPPED** and the overall run **INCOMPLETE**, even when the core gates pass. The current verification snapshot is recorded in [END-TO-END-VERIFICATION.md](END-TO-END-VERIFICATION.md).
+
+The 2026-10-21 verification run reported 138 tests passing across the TypeScript and Python runners; typecheck, lint, and the production audit passed. The live-server browser E2E run passed, and a separate simulated no-server run confirmed skip reporting. See [END-TO-END-VERIFICATION.md](END-TO-END-VERIFICATION.md) for the gate-by-gate record.
 
 ```bash
 # Run entire TypeScript unit test suite
@@ -37,12 +41,12 @@ pnpm run test:ui
 node --experimental-strip-types app/api/route_auth.test.ts
 
 # Run TypeScript static typecheck
-npx tsc --noEmit
+pnpm exec tsc --noEmit
 
 # Run ESLint static analysis
 pnpm lint
 
-# Run unified full product verification suite (All 6 Quality Gates)
+# Run unified full product verification suite
 make verify
 # or: bash ./scripts/verify.sh
 ```
