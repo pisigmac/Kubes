@@ -2,6 +2,8 @@
 
 Kubes utilizes SQLite in **WAL (Write-Ahead Logging)** mode via `better-sqlite3`. All primary entity tables incorporate compound indexes and foreign key relationships enforcing strict multi-tenant isolation.
 
+The independent provider credential service uses a separate PostgreSQL database and migration lifecycle. Its `credentials` rows are uniquely scoped by `(tenant_id, principal_id, provider_id)` and store AEAD ciphertext, key version, verification status, and timestamps. `provider_preferences` stores the principal's selected provider and model, scoped by `(tenant_id, principal_id)`. The service uses these tables only through owner-scoped repository methods; plaintext keys are never persisted.
+
 ```mermaid
 erDiagram
     CUBES ||--o{ THREADS : contains

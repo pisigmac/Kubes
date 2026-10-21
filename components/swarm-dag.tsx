@@ -34,7 +34,7 @@ export function useSwarmStream() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const { providerId, providerKey } = getBrowserProviderSelection();
+    const { providerId } = getBrowserProviderSelection();
 
     try {
       const response = await fetch("/api/swarm", {
@@ -42,7 +42,6 @@ export function useSwarmStream() {
         headers: {
           "Content-Type": "application/json",
           ...(providerId ? { "x-kubes-provider-id": providerId } : {}),
-          ...(providerKey ? { "x-kubes-provider-key": providerKey } : {}),
         },
         body: JSON.stringify(customPlan ? { plan: customPlan } : { objective }),
         signal: controller.signal,

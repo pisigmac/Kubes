@@ -6,6 +6,7 @@ export interface ProviderItem {
   id: string;
   name: string;
   configured: boolean;
+  verified?: boolean;
   baseURL: string;
   defaultModel: string;
   fallbackModels: string[];
@@ -32,14 +33,10 @@ function readBrowserProviderVerification(): Record<string, boolean> {
   }
 }
 
-export function getBrowserProviderSelection(): { providerId?: string; providerKey?: string } {
+export function getBrowserProviderSelection(): { providerId?: string } {
   try {
     const providerId = window.localStorage.getItem(BROWSER_ACTIVE_PROVIDER) || undefined;
-    const keys = readBrowserProviderKeys();
-    const verification = readBrowserProviderVerification();
-    return providerId && verification[providerId] && keys[providerId]
-      ? { providerId, providerKey: keys[providerId] }
-      : {};
+    return providerId ? { providerId } : {};
   } catch {
     return {};
   }
@@ -63,6 +60,9 @@ export function ProviderModal({
     message: string;
   } | null>(null);
   const [customKey, setCustomKey] = useState<string>("");
+  const [legacyKeys, setLegacyKeys] = useState<Record<string, string>>({});
+  const [credentialServiceAvailable, setCredentialServiceAvailable] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
   const keyInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -127,44 +127,26 @@ export function ProviderModal({
     let isCurrent = true;
     fetch("/api/providers")
       .then((res) => res.json())
-      .then((data: { providers?: ProviderItem[]; activeProvider?: string }) => {
+      .then((data: { providers?: ProviderItem[]; activeProvider?: string | null; credentialService?: boolean }) => {
         if (isCurrent && data.providers) {
           const browserKeys = readBrowserProviderKeys();
-          setProviders(
-            data.providers.map((provider) => ({
-              ...provider,
-              configured: provider.configured || Boolean(browserKeys[provider.id]),
-            })),
-          );
-          const activeProvider = window.localStorage.getItem(BROWSER_ACTIVE_PROVIDER) || data.activeProvider;
+          setCredentialServiceAvailable(Boolean(data.credentialService));
+          setProviders(data.providers);
+          setLegacyKeys(data.credentialService ? browserKeys : {});
+          const activeProvider = data.credentialService
+            ? data.activeProvider || undefined
+            : data.activeProvider || window.localStorage.getItem(BROWSER_ACTIVE_PROVIDER);
+          setActiveProvider(activeProvider ?? null);
+          if (data.credentialService && !activeProvider) window.localStorage.removeItem(BROWSER_ACTIVE_PROVIDER);
           if (activeProvider) {
             setSelectedProvider(activeProvider);
             const activeProviderConfig = data.providers.find((provider) => provider.id === activeProvider);
             if (activeProviderConfig?.defaultModel) onModelSelectRef.current?.(activeProviderConfig.defaultModel);
           }
           setLoading(false);
-          const activeKey = activeProvider ? browserKeys[activeProvider] : undefined;
-          if (activeProvider && activeKey) {
-            void fetch("/api/providers", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "test", providerId: activeProvider, apiKey: activeKey }),
-            })
-              .then((res) => res.json() as Promise<{ ok?: boolean; models?: string[] }>)
-              .then((result) => {
-                if (!isCurrent || !result.ok || !result.models?.length) return;
-                setProviders((current) =>
-                  current.map((provider) =>
-                    provider.id === activeProvider
-                      ? { ...provider, configured: true, fallbackModels: result.models ?? provider.fallbackModels }
-                      : provider,
-                  ),
-                );
-              })
-              .catch(() => undefined);
-          }
-          setCustomKey(activeProvider && activeKey ? activeKey : "");
+          setCustomKey("");
         }
+        if (isCurrent) setLoading(false);
       })
       .catch((err) => {
         if (isCurrent) {
@@ -178,20 +160,19 @@ export function ProviderModal({
   }, [isOpen]);
 
   async function handleActivate(providerId: string) {
-    const browserKey = readBrowserProviderKeys()[providerId];
-    const effectiveKey = browserKey || undefined;
     try {
-      await fetch("/api/providers", {
+      const response = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "activate",
           providerId,
-          apiKey: effectiveKey,
         }),
       });
+      if (!response.ok) throw new Error("Could not activate this provider. Verify that its key is saved and tested.");
       window.localStorage.setItem(BROWSER_ACTIVE_PROVIDER, providerId);
       window.dispatchEvent(new Event(BROWSER_PROVIDER_UPDATED));
+      setActiveProvider(providerId);
       setSelectedProvider(providerId);
       const provider = providers.find((item) => item.id === providerId);
       if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
@@ -204,8 +185,7 @@ export function ProviderModal({
     setTestingId(providerId);
     setTestResult(null);
     try {
-      const browserKey = readBrowserProviderKeys()[providerId];
-      const effectiveKey = apiKey?.trim() || customKey.trim() || browserKey || undefined;
+      const effectiveKey = apiKey?.trim() || customKey.trim() || undefined;
       const res = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -216,7 +196,7 @@ export function ProviderModal({
         }),
       });
       const text = await res.text().catch(() => "");
-      let body: { ok: boolean; message?: string; error?: string; models?: string[] };
+      let body: { ok: boolean; saved?: boolean; message?: string; error?: string; models?: string[] };
       try {
         body = text ? JSON.parse(text) : { ok: false, error: "Empty response from server" };
       } catch {
@@ -230,36 +210,24 @@ export function ProviderModal({
       setTestResult({
         id: providerId,
         ok: body.ok,
-        message:
-          body.ok && effectiveKey
-            ? `${body.message ?? "Connected!"} Saved in this browser.`
-            : body.ok
-              ? (body.message ?? "Connected!")
-              : (body.error ?? "Connection failed"),
+        message: body.message ?? (body.ok ? "Provider connection verified." : body.error ?? "Connection failed"),
       });
-      if (body.ok && effectiveKey) {
+      if (body.saved && effectiveKey) {
         const keys = readBrowserProviderKeys();
-        keys[providerId] = effectiveKey;
+        delete keys[providerId];
         window.localStorage.setItem(BROWSER_PROVIDER_KEYS, JSON.stringify(keys));
-        window.localStorage.setItem(BROWSER_ACTIVE_PROVIDER, providerId);
         const verification = readBrowserProviderVerification();
-        verification[providerId] = true;
+        delete verification[providerId];
         window.localStorage.setItem(BROWSER_PROVIDER_VERIFICATION, JSON.stringify(verification));
+        setLegacyKeys((current) => {
+          const next = { ...current };
+          delete next[providerId];
+          return next;
+        });
+        setCustomKey("");
         window.dispatchEvent(new Event(BROWSER_PROVIDER_UPDATED));
-        setCustomKey(effectiveKey);
-        const provider = providers.find((item) => item.id === providerId);
-        if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
-
-        void fetch("/api/providers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "activate",
-            providerId,
-            apiKey: effectiveKey,
-          }),
-        }).catch((e) => console.warn("Failed to activate provider on server:", e));
       }
+      if (body.saved) setProviders((current) => current.map((provider) => provider.id === providerId ? { ...provider, configured: true, verified: body.ok } : provider));
       if (body.ok && body.models?.length) {
         setProviders((current) =>
           current.map((provider) =>
@@ -278,10 +246,41 @@ export function ProviderModal({
     }
   }
 
+  async function handleRemove(providerId: string) {
+    if (!window.confirm("Remove this provider credential from your account?")) return;
+    const response = await fetch("/api/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", providerId }),
+    });
+    if (!response.ok) {
+      setTestResult({ id: providerId, ok: false, message: "Could not remove this provider credential." });
+      return;
+    }
+    setProviders((current) => current.map((provider) => provider.id === providerId ? { ...provider, configured: false, verified: false } : provider));
+    if (activeProvider === providerId) setActiveProvider(null);
+    if (selectedProvider === providerId) setSelectedProvider("gemini");
+    window.dispatchEvent(new Event(BROWSER_PROVIDER_UPDATED));
+  }
+
+  function handleDiscardLegacyKey(providerId: string) {
+    if (!window.confirm("Delete this key from this browser without importing it to your account?")) return;
+    const keys = readBrowserProviderKeys();
+    delete keys[providerId];
+    window.localStorage.setItem(BROWSER_PROVIDER_KEYS, JSON.stringify(keys));
+    const verification = readBrowserProviderVerification();
+    delete verification[providerId];
+    window.localStorage.setItem(BROWSER_PROVIDER_VERIFICATION, JSON.stringify(verification));
+    setLegacyKeys((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+  }
+
   function configureProvider(providerId: string) {
     setSelectedProvider(providerId);
-    window.localStorage.setItem(BROWSER_ACTIVE_PROVIDER, providerId);
-    setCustomKey(readBrowserProviderKeys()[providerId] || "");
+    setCustomKey("");
     const provider = providers.find((item) => item.id === providerId);
     if (provider?.defaultModel) onModelSelectRef.current?.(provider.defaultModel);
     requestAnimationFrame(() => {
@@ -389,7 +388,7 @@ export function ProviderModal({
                                   : "bg-white/10 text-white/40"
                               }`}
                             >
-                              {p.configured ? "● Active" : "○ Not Configured"}
+                              {p.configured ? (p.verified === true ? "● Verified" : p.verified === false ? "● Saved · not verified" : "● Active") : "○ Not Configured"}
                             </span>
                           </div>
                           <p className="font-mono text-[11px] text-white/40 truncate max-w-sm">
@@ -398,7 +397,7 @@ export function ProviderModal({
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {p.configured && selectedProvider === p.id ? (
+                          {p.configured && activeProvider === p.id ? (
                             <span className="rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
                               ✓ Active
                             </span>
@@ -425,11 +424,17 @@ export function ProviderModal({
                             <button
                               type="button"
                               onClick={() => configureProvider(p.id)}
+                              disabled={!credentialServiceAvailable}
                               className="rounded-full border border-[#e7ff3a]/30 bg-[#e7ff3a]/10 px-3 py-1 text-xs text-[#e7ff3a] hover:bg-[#e7ff3a]/20 transition"
                             >
                               Configure
                             </button>
                           )}
+                          {p.configured && credentialServiceAvailable ? (
+                            <button type="button" onClick={() => void handleRemove(p.id)} className="rounded-full border border-red-400/20 px-2.5 py-1 text-[11px] text-red-300 hover:bg-red-400/10">
+                              Remove
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -467,6 +472,12 @@ export function ProviderModal({
           </div>
 
           {/* Quick API Key Tester & Guide */}
+          {!credentialServiceAvailable ? (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 text-xs text-amber-100">
+              Personal credential storage is not connected. Preconfigured environment providers may still work; adding and syncing personal keys requires the provider credential service.
+            </div>
+          ) : null}
+
           <div className="rounded-xl border border-white/10 bg-black/40 p-4 space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-white/50">
               Configure {providers.find((p) => p.id === selectedProvider)?.name ?? "Provider"}
@@ -494,21 +505,46 @@ export function ProviderModal({
                 placeholder={`Paste ${providers.find((p) => p.id === selectedProvider)?.name ?? "provider"} API key...`}
                 value={customKey}
                 onChange={(e) => setCustomKey(e.target.value)}
+                disabled={!credentialServiceAvailable}
                 className="flex-1 rounded-lg border border-white/10 bg-[#0c0c0e] px-3 py-1.5 font-mono text-xs text-white outline-none focus:border-[#e7ff3a]"
               />
               <button
                 type="button"
                 onClick={() => void handleTest(selectedProvider, customKey)}
-                disabled={testingId !== null || !customKey.trim()}
+                disabled={!credentialServiceAvailable || testingId !== null || !customKey.trim()}
                 className="rounded-lg bg-[#e7ff3a] px-3.5 py-1.5 text-xs font-semibold text-black hover:bg-[#e7ff3a]/90 transition disabled:opacity-40"
               >
                 {testingId === selectedProvider ? "Verifying..." : "Verify Key"}
               </button>
             </div>
             <p className="text-[11px] text-white/40">
-              Verified keys are stored only in this browser and used for this app session. They are not written to the server or <code>.env.local</code>.
+              Keys are sent to the authenticated service, encrypted at rest, and synced to your account. The browser never stores newly added keys.
+            </p>
+            <p className="text-[11px] text-amber-200/70">
+              Verify sends a short chat request to the provider; its pricing or rate limits may apply.
             </p>
           </div>
+
+          {credentialServiceAvailable && Object.keys(legacyKeys).length > 0 ? (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 space-y-2">
+              <p className="text-xs text-amber-100">Provider keys from this browser are still stored locally. Import each key only if you want it encrypted and synced to your signed-in account.</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(legacyKeys).map((providerId) => (
+                  <div key={providerId} className="flex gap-2">
+                    <button type="button" onClick={() => {
+                      const accepted = window.confirm("Import this provider key to your signed-in account? It will be sent to the server over your authenticated connection and removed from this browser only after the server confirms it was saved.");
+                      if (accepted) void handleTest(providerId, legacyKeys[providerId]);
+                    }} className="rounded-full border border-amber-300/30 px-3 py-1 text-xs text-amber-100 hover:bg-amber-300/10">
+                      Import {providers.find((item) => item.id === providerId)?.name ?? providerId}
+                    </button>
+                    <button type="button" onClick={() => handleDiscardLegacyKey(providerId)} className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:bg-white/10">
+                      Delete from browser
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Modal Footer */}

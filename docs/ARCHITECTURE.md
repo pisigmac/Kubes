@@ -20,10 +20,12 @@ flowchart TD
         WebServer["Kubes Web App & API Routes (Port 3000)"]
         AgentCore["Python Agent Core / LLM Routing (Port 8000)"]
         Scheduler["Autonomous Cron Scheduler Daemon"]
+        CredentialService["Provider Credentials Go Service (private network)"]
     end
 
     subgraph Persistence["Storage & State Layer"]
         SQLite[("SQLite Database (data/cubes.db) [WAL Mode]")]
+        CredentialDB[("Provider Credentials PostgreSQL")]
         JailFS["Partitioned Filesystems (data/computer/orgs/<org-id>/)"]
         ChromiumPool["Isolated Chromium Browser Contexts"]
     end
@@ -33,10 +35,15 @@ flowchart TD
     WebServer -->|Cryptographic Verification| DeskID
     WebServer -->|IPC / HTTP| AgentCore
     WebServer -->|Read / Write| SQLite
+    WebServer -->|User JWT + backend client auth; chat proxy| CredentialService
+    CredentialService -->|AEAD ciphertext only| CredentialDB
+    CredentialService -->|Provider key injected server-side| Provider["Configured OpenAI-compatible provider"]
     WebServer -->|Jail Execution| JailFS
     WebServer -->|Puppeteer Actions| ChromiumPool
     Scheduler -->|Cron Trigger| WebServer
 ```
+
+Provider credentials are personal to the authenticated `(tenant, principal)` pair. The browser submits a key only during an explicit save or consent-based import. Kubes sends subsequent model requests through the private credential service; that service owns encrypted PostgreSQL persistence and adds the key only to its outbound provider request. The credential service has no published port in the Compose topology. This integration is under implementation and still needs live database, identity, and provider verification.
 
 ---
 

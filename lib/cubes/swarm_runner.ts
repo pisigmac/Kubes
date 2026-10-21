@@ -35,6 +35,7 @@ export interface SwarmRunnerOptions {
   scope?: ResourceScope | string;
   providerKey?: string;
   providerId?: string;
+  userAccessToken?: string;
   abortSignal?: AbortSignal;
   onEvent?: (event: SwarmRunnerEvent) => void | Promise<void>;
   executor?: (task: SwarmTask, prompt: string, signal: AbortSignal) => Promise<string>;
@@ -44,7 +45,7 @@ export interface SwarmRunnerOptions {
  * Executes a full SwarmPlan batch-by-batch according to its topological DAG dependencies.
  */
 export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<SwarmPlan> {
-  const { plan, scope, abortSignal, onEvent, executor, providerKey, providerId } = options;
+  const { plan, scope, abortSignal, onEvent, executor, providerKey, providerId, userAccessToken } = options;
 
   const validation = validateSwarmPlan(plan);
   if (!validation.valid) {
@@ -144,6 +145,7 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
             abortController.signal,
             providerKey,
             providerId,
+            userAccessToken,
           );
         }
 
@@ -219,6 +221,7 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
       executor,
       providerKey,
       providerId,
+      userAccessToken,
     });
 
     currentPlan.synthesis = synthesisResult.markdown;

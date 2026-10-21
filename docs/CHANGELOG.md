@@ -2,6 +2,11 @@
 
 All notable changes to the Kubes Autonomous AI Platform are documented in this file.
 
+## Unreleased
+
+### Added
+- **Independent Provider Credentials Service** (`services/provider-credentials/`): Go service with PostgreSQL-owned persistence, configurable JWT/JWKS claim mapping, AES-256-GCM encryption, authenticated provider testing, and OpenAI-compatible streaming proxying. Kubes provider settings, chat, handoff, and swarm paths can use the private service; browser-key migration is consent-based. Runtime Compose and real DeskID/provider verification remain pending.
+
 ## [1.6.0] - 2026-10-13
 
 ### Added

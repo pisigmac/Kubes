@@ -124,7 +124,7 @@ function manageTools(currentCube: Cube) {
   } satisfies ToolSet;
 }
 
-function handoffTool(caller: Cube) {
+function handoffTool(caller: Cube, providerKey?: string, providerId?: string, userAccessToken?: string) {
   const scope = cubeScope(caller);
   return tool({
     description:
@@ -151,7 +151,7 @@ function handoffTool(caller: Cube) {
         return missing;
       }
 
-      const receiver = buildCubeAgent(cube, { handoff: false, manage: false });
+      const receiver = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, undefined, userAccessToken);
       const result = await receiver.stream({
         prompt: `Respond directly to the user. Do not mention that you were handed this.\n\n${goal}`,
         abortSignal,
@@ -314,11 +314,12 @@ function buildCubeAgent(
   providerKey?: string,
   providerId?: string,
   approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+  userAccessToken?: string,
 ) {
   const orgId = cube.orgId || "default";
   const roster = options.manage || options.handoff ? `\n\nCurrent roster:\n${rosterText(listCubes(orgId))}` : "";
   return new ToolLoopAgent({
-    model: getLanguageModel({ modelId: cube.model, providerKey, providerId }),
+    model: getLanguageModel({ modelId: cube.model, providerKey, providerId, userAccessToken }),
     instructions: `${cube.instructions}\n\n${computerBlock(cube, options.handoff)}${roster}`,
     tools: {
       ...computerTools({
@@ -333,7 +334,7 @@ function buildCubeAgent(
         abortSignal: approvalOptions?.abortSignal,
       }),
       ...scheduleTools(cube),
-      ...(options.handoff ? { handoff: handoffTool(cube) } : {}),
+      ...(options.handoff ? { handoff: handoffTool(cube, providerKey, providerId, userAccessToken) } : {}),
       ...(options.manage ? manageTools(cube) : {}),
     },
     stopWhen: isStepCount(options.manage ? 16 : 12),
@@ -345,8 +346,9 @@ export function buildMaestroAgent(
   providerKey?: string,
   providerId?: string,
   approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+  userAccessToken?: string,
 ) {
-  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId, approvalOptions);
+  return buildCubeAgent(cube, { handoff: true, manage: true }, providerKey, providerId, approvalOptions, userAccessToken);
 }
 
 export function buildSpecialistAgent(
@@ -354,8 +356,9 @@ export function buildSpecialistAgent(
   providerKey?: string,
   providerId?: string,
   approvalOptions?: { safeMode?: boolean; approvedCommands?: string[]; approvedWrites?: string[]; abortSignal?: AbortSignal },
+  userAccessToken?: string,
 ) {
-  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId, approvalOptions);
+  return buildCubeAgent(cube, { handoff: true, manage: false }, providerKey, providerId, approvalOptions, userAccessToken);
 }
 
 export async function runCubeInstruction(
@@ -364,8 +367,9 @@ export async function runCubeInstruction(
   signal: AbortSignal,
   providerKey?: string,
   providerId?: string,
+  userAccessToken?: string,
 ): Promise<string> {
-  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, { abortSignal: signal });
+  const agent = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, { abortSignal: signal }, userAccessToken);
   const result = await agent.generate({ prompt: instruction, abortSignal: signal });
   return result.text;
 }

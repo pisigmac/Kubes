@@ -85,3 +85,17 @@
   2. Confirmed `pnpm-lock.yaml` resolves KaTeX to `0.16.47` through Mermaid.
 - **Resolution & Fix**: Added a pnpm workspace override for `katex@0.18.2` in `pnpm-workspace.yaml` and regenerated `pnpm-lock.yaml` with pnpm 11.17.0.
 - **Verification**: `pnpm audit --prod` reports no known vulnerabilities. The full `make verify` run passed all 138 tests, typecheck, lint, and audit. Browser E2E was skipped because the web server was stopped.
+
+## [DEBUG-008] Provider Service Verification Environment Limits
+
+- **Incident ID & Title**: `[DEBUG-008] Provider Service Verification Environment Limits`
+- **Symptoms & Error Messages**: The initial Go module command could not write its default build cache and could not resolve `proxy.golang.org` from the restricted shell. Moving the Go cache into `/tmp` and allowing the module download resolved those constraints; Go unit tests and `go vet` then passed. The repository TypeScript check could not start because a non-Codex Node.js executable was not available in this shell (`node: not found`). Docker was not invoked from this environment, per the user's instruction to run Docker commands themselves.
+- **Root Cause**: The execution shell has a restricted writable filesystem and network, and does not expose the user's standalone Node.js runtime. Docker access is unavailable through this shell.
+- **Diagnostic Steps**:
+  1. Ran the standalone Go toolchain with the default Go cache; cache writes failed outside writable paths.
+  2. Re-ran with a temporary Go cache and fetched the PostgreSQL driver modules; Go tests and vet passed.
+  3. An initial JWT test tried to bind a loopback HTTP server, which the sandbox disallowed; changed the test to validate signed tokens against an in-memory JWKS key set instead.
+  4. Ran `pnpm exec tsc --noEmit`; the command wrapper could not locate Node.js and exited before type checking.
+  5. Did not invoke Docker; Compose and PostgreSQL runtime checks are waiting for the user's run.
+- **Resolution & Fix**: No repository workaround was added for the restricted shell. The Go verification passed after using `/tmp`. TypeScript and Compose verification require the user's local Node.js and Docker environment.
+- **Verification**: Go unit tests and `go vet` pass. TypeScript check, Compose config/build, PostgreSQL migration, persistence, DeskID token validation, and provider proxy verification remain incomplete pending local commands.

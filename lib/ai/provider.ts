@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createOpenAI } from "@ai-sdk/openai";
+import { credentialProxyFetch } from "./credential-service.ts";
 
 export type ProviderId =
   | "gemini"
@@ -716,6 +717,7 @@ export interface ModelInvocationOptions {
   modelId?: string;
   providerKey?: string;
   providerId?: string;
+  userAccessToken?: string;
 }
 
 export function resolveModelInvocation(options?: ModelInvocationOptions | string): ResolvedProvider {
@@ -733,12 +735,12 @@ export function resolveModelInvocation(options?: ModelInvocationOptions | string
 
   const key = explicitApiKey || (explicitProvider ? getProviderEnvKey(explicitProvider) : undefined);
 
-  if (explicitProvider && key) {
+  if (explicitProvider && (key || process.env.PROVIDER_CREDENTIALS_URL?.trim())) {
     return {
       providerId: explicitProvider.id,
       name: explicitProvider.name,
       baseURL: getProviderEnvURL(explicitProvider),
-      apiKey: key,
+      apiKey: key || "credential-service-proxy",
       headers: explicitProvider.id === "openrouter"
         ? { "HTTP-Referer": "http://localhost:3000", "X-Title": "Kubes" }
         : {},
@@ -756,6 +758,24 @@ export function resolveModelInvocation(options?: ModelInvocationOptions | string
  */
 export function getLanguageModel(options?: ModelInvocationOptions | string) {
   const resolved = resolveModelInvocation(options);
+  const invocationOptions: ModelInvocationOptions = typeof options === "object" && options ? options : {};
+  if (process.env.PROVIDER_CREDENTIALS_URL?.trim()) {
+    if (!invocationOptions.userAccessToken) {
+      throw new Error("Sign in to use your saved provider credentials.");
+    }
+    const providerId = invocationOptions.providerId || resolved.providerId;
+    const serviceURL = process.env.PROVIDER_CREDENTIALS_URL.trim().replace(/\/$/, "");
+    const provider = createOpenAI({
+      apiKey: "credential-service-proxy",
+      baseURL: `${serviceURL}/v1/proxy/${encodeURIComponent(providerId)}`,
+      name: `kubes-${providerId}`,
+      fetch: createResilientFetch(providerId as ProviderId, {
+        maxRetries: 0,
+        fetchFn: credentialProxyFetch(providerId, invocationOptions.userAccessToken),
+      }),
+    });
+    return provider.chat(resolved.modelId);
+  }
 
   const apiKey = resolved.apiKey;
   if (!apiKey) {

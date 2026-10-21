@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: Provider Credentials Service
+  version: 1.0.0
+  description: Principal-scoped encrypted provider credentials with server-side provider proxying.
+servers:
+  - url: http://localhost:8081
+security:
+  - UserBearer: []
+    ServiceClientToken: []
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        '200': { description: Liveness }
+  /ready:
+    get:
+      security: []
+      responses:
+        '200': { description: Readiness }
+  /v1/me/providers:
+    get:
+      responses:
+        '200':
+          description: Provider metadata and selection. Never includes secret material.
+          content:
+            application/json:
+              schema: { type: object }
+  /v1/me/providers/{providerId}/credential:
+    parameters:
+      - { name: providerId, in: path, required: true, schema: { type: string } }
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [api_key], properties: { api_key: { type: string, writeOnly: true } } }
+      responses:
+        '200': { description: Saved status only }
+    delete:
+      responses:
+        '200': { description: Deleted }
+  /v1/me/providers/{providerId}/test:
+    parameters:
+      - { name: providerId, in: path, required: true, schema: { type: string } }
+    post:
+      responses:
+        '200': { description: Safe verification category and latency }
+  /v1/me/provider-selection:
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider_id, model_id]
+              properties:
+                provider_id: { type: string }
+                model_id: { type: string }
+      responses:
+        '200': { description: Saved non-secret selection }
+  /v1/proxy/{providerId}/chat/completions:
+    parameters:
+      - { name: providerId, in: path, required: true, schema: { type: string } }
+    post:
+      description: Streams an OpenAI-compatible completion using the caller's verified provider credential.
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        '200': { description: Provider response stream }
+components:
+  securitySchemes:
+    UserBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ServiceClientToken:
+      type: apiKey
+      in: header
+      name: X-Service-Client-Token
+      description: Backend-only token; send it as Bearer <token>. Never expose it to browser clients.

@@ -17,15 +17,64 @@ services:
     environment:
       - NODE_ENV=production
       - PRIMARY_MODEL=${PRIMARY_MODEL:-gemini-3.8-flash}
-      - AUTH_MODE=${AUTH_MODE:-none}
+      - AUTH_MODE=${AUTH_MODE:-deskid}
+      - DESKID_JWKS_URL=${IDENTITY_JWKS_URL:?Set IDENTITY_JWKS_URL in .env.provider-credentials}
+      - DESKID_ISSUER=${IDENTITY_ISSUER:?Set IDENTITY_ISSUER in .env.provider-credentials}
+      - DESKID_AUDIENCE=${IDENTITY_AUDIENCE:?Set IDENTITY_AUDIENCE in .env.provider-credentials}
       - CUBES_CHROME=/usr/bin/chromium
       - CUBES_COMPUTER_ROOT=/app/data/computer
+      - PROVIDER_CREDENTIALS_URL=http://provider-credentials:8081
+      - PROVIDER_CREDENTIALS_CLIENT_TOKEN=${SERVICE_CLIENT_TOKEN:?Set SERVICE_CLIENT_TOKEN in .env.provider-credentials}
     volumes:
       - kubes_data:/app/data
     depends_on:
       - kubes-agent-core
+      - provider-credentials
     networks:
       - kubes-network
+      - provider-credentials-network
+
+  provider-credentials-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=provider_credentials
+      - POSTGRES_USER=provider_credentials
+      - POSTGRES_PASSWORD=${PROVIDER_CREDENTIALS_DB_PASSWORD:?Set PROVIDER_CREDENTIALS_DB_PASSWORD in .env.provider-credentials}
+    volumes:
+      - provider_credentials_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U provider_credentials -d provider_credentials"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - provider-credentials-network
+
+  provider-credentials:
+    build:
+      context: ./services/provider-credentials
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.provider-credentials
+    environment:
+      - LISTEN_ADDR=:8081
+      - DATABASE_URL=postgres://provider_credentials:${PROVIDER_CREDENTIALS_DB_PASSWORD}@provider-credentials-db:5432/provider_credentials?sslmode=disable
+      - PROVIDER_REGISTRY_FILE=/config/providers.json
+    volumes:
+      - ./config/providers.json:/config/providers.json:ro
+    depends_on:
+      provider-credentials-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - provider-credentials-network
 
   kubes-agent-core:
     build:
@@ -68,7 +117,11 @@ services:
 volumes:
   kubes_data:
     driver: local
+  provider_credentials_db:
+    driver: local
 
 networks:
   kubes-network:
+    driver: bridge
+  provider-credentials-network:
     driver: bridge

@@ -2,7 +2,7 @@ import { createAgentUIStreamResponse, type UIMessage } from "ai";
 import { trackCube } from "../../../lib/cubes/busy.ts";
 import { buildMaestroAgent, buildSpecialistAgent } from "../../../lib/cubes/runtime.ts";
 import { getCube, getThread, HttpError, saveThreadMessages } from "../../../lib/cubes/store.ts";
-import { requireAuth } from "../../../lib/auth/deskid.ts";
+import { extractAuthToken, requireAuth } from "../../../lib/auth/deskid.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +24,12 @@ export async function POST(request: Request) {
       cubeId?: string;
       threadId?: string;
       providerId?: string;
-      providerKey?: string;
       safeMode?: boolean;
       approvedCommands?: string[];
       approvedWrites?: string[];
     };
     const providerId = body.providerId || request.headers.get("x-kubes-provider-id") || undefined;
-    const providerKey = body.providerKey || request.headers.get("x-kubes-provider-key") || undefined;
+    const userAccessToken = extractAuthToken(request) || undefined;
     const safeMode =
       body.safeMode !== undefined
         ? Boolean(body.safeMode)
@@ -117,7 +116,7 @@ export async function POST(request: Request) {
     try {
       if (cube.isMaestro) {
         return createAgentUIStreamResponse({
-          agent: buildMaestroAgent(cube, providerKey, providerId, approvalOptions),
+          agent: buildMaestroAgent(cube, undefined, providerId, approvalOptions, userAccessToken),
           uiMessages,
           originalMessages: uiMessages,
           abortSignal: abortController.signal,
@@ -130,7 +129,7 @@ export async function POST(request: Request) {
       }
 
       return createAgentUIStreamResponse({
-        agent: buildSpecialistAgent(cube, providerKey, providerId, approvalOptions),
+        agent: buildSpecialistAgent(cube, undefined, providerId, approvalOptions, userAccessToken),
         uiMessages,
         originalMessages: uiMessages,
         abortSignal: abortController.signal,

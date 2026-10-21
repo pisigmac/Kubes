@@ -130,24 +130,24 @@ export function CubeChat({
     let isCurrent = true;
     const refreshProviderState = () => {
       const clientSelection = getBrowserProviderSelection();
-      if (clientSelection.providerKey) {
-        if (isCurrent) {
-          setProviderReady(true);
-          if (clientSelection.providerId) setActiveProviderName(clientSelection.providerId);
-        }
-        return;
-      }
       fetch("/api/providers")
         .then((res) => res.json())
-        .then((data: { providers?: { id: string; name: string; configured: boolean }[]; activeProvider?: string }) => {
+        .then((data: { providers?: { id: string; name: string; configured: boolean; verified?: boolean }[]; activeProvider?: string | null; credentialService?: boolean }) => {
           if (!isCurrent) return;
           if (data.providers) {
-            const hasConfigured = data.providers.some((p) => p.configured);
-            setProviderReady(hasConfigured);
-            const active =
-              data.providers.find((p) => p.id === data.activeProvider) ||
-              data.providers.find((p) => p.configured);
-            if (active) setActiveProviderName(active.name);
+            const hasConfigured = data.providers.some((p) => p.configured && p.verified !== false);
+            const active = data.activeProvider
+              ? data.providers.find((p) => p.id === data.activeProvider && p.configured && p.verified !== false)
+              : data.credentialService
+                ? undefined
+                : data.providers.find((p) => p.configured && p.verified !== false);
+            setProviderReady(hasConfigured && (!data.credentialService || Boolean(active)));
+            setActiveProviderName(active?.name ?? null);
+            if (active) {
+              window.localStorage.setItem("kubes.activeProvider", active.id);
+            }
+            if (data.credentialService && !active) window.localStorage.removeItem("kubes.activeProvider");
+            if (!data.credentialService && clientSelection.providerId && !active) setActiveProviderName(clientSelection.providerId);
           }
         })
         .catch(() => {

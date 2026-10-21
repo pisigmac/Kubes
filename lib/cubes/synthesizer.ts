@@ -36,6 +36,7 @@ export interface SynthesizerOptions {
   abortSignal?: AbortSignal;
   providerKey?: string;
   providerId?: string;
+  userAccessToken?: string;
   executor?: (task: SwarmTask, prompt: string, signal: AbortSignal) => Promise<string>;
 }
 
@@ -321,6 +322,7 @@ export async function synthesizeSwarmPlan(
           options.abortSignal || new AbortController().signal,
           options.providerKey,
           options.providerId,
+          options.userAccessToken,
         );
       } else {
         return generateFallbackSynthesis(plan.rootObjective, plan.tasks, artifacts);

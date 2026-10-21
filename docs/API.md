@@ -61,3 +61,7 @@ When `AUTH_MODE=deskid`, unauthenticated requests receive `HTTP 401 Unauthorized
   - *Role Required*: `viewer`
 - **`GET /api/computer/download?path=<relative_path>&slug=<slug>`**: Downloads an artifact file securely from the jail workspace.
   - *Role Required*: `viewer`
+
+### 6. Provider Credentials
+
+When `PROVIDER_CREDENTIALS_URL` is configured, `/api/providers` reads user-scoped metadata from the private credential service. Mutations require `editor`; provider credentials are never returned after submission. Chat and swarm requests carry only provider selection metadata and are proxied server-to-server with the user's authenticated token. New keys are sent only for explicit save/verification. Legacy browser keys are migrated only after confirmation.

@@ -1,4 +1,4 @@
-import { requireAuth, assertRole } from "../../../lib/auth/deskid.ts";
+import { extractAuthToken, requireAuth, assertRole } from "../../../lib/auth/deskid.ts";
 import {
   executeSwarmPlan,
   decomposeObjectiveToPlan,
@@ -18,7 +18,6 @@ export async function POST(request: Request) {
       plan?: SwarmPlan;
       objective?: string;
       providerId?: string;
-      providerKey?: string;
     };
 
     let targetPlan: SwarmPlan;
@@ -44,8 +43,7 @@ export async function POST(request: Request) {
 
     const providerId =
       body.providerId || request.headers.get("x-kubes-provider-id") || undefined;
-    const providerKey =
-      body.providerKey || request.headers.get("x-kubes-provider-key") || undefined;
+    const userAccessToken = extractAuthToken(request) || undefined;
 
     const encoder = new TextEncoder();
 
@@ -61,7 +59,7 @@ export async function POST(request: Request) {
             plan: targetPlan,
             scope: auth,
             providerId,
-            providerKey,
+            userAccessToken,
             abortSignal: request.signal,
             onEvent: sendEvent,
           });

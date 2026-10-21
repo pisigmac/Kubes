@@ -326,7 +326,7 @@
 ## [ADR-014] DeskID-Scoped Personal Provider Credentials
 
 - **Date**: 2026-10-21
-- **Status**: Accepted architecture direction; implementation pending.
+- **Status**: Accepted; initial implementation underway (2026-10-21). Runtime and database integration remain unverified.
 - **Context & Problem Statement**:
   The current provider flow stores API keys and verification state in browser `localStorage`, sends keys from the browser with chat and swarm requests, and keeps runtime provider keys and active selection in process-global memory. This does not support safe account-level persistence across devices and can blur boundaries between users on a shared server. The product uses DeskID login, and the agreed current model is one user in one organization.
 - **Decision Made**:
@@ -344,8 +344,26 @@
   - *Organization-owned credentials as the default*: Rejected for the current product model; personal credentials are the default. Organization-managed credentials may be introduced later as a separate, explicitly labeled capability.
   - *Administrator access to personal key values*: Rejected; future administrator controls govern provider usage policy, not secret retrieval.
 - **Consequences & System Impact**:
-  This decision supersedes ADR-006. Implementation will require a durable encrypted credential store, authenticated user-and-organization scoping for provider preferences and secrets, server-side provider resolution for chat and swarm execution, removal of key values from browser persistence and request payloads, and migration or re-entry handling for existing browser-local keys. Until those changes are implemented, the current code remains inconsistent with this target architecture and must not be described as providing account-synced credential storage.
+  This decision supersedes ADR-006. The initial implementation now provides an independent encrypted credential service, user-and-organization scoping, server-side proxy calls for chat and swarm, and consent-based browser-key import. Runtime database, identity, provider, scheduled-job delegation, key rotation, and production transport verification remain incomplete; see ADR-015 before describing the integration as production-ready.
 
+## [ADR-015] Provider Credentials as an Independent Proxy Service
 
-
-
+- **Date**: 2026-10-21
+- **Status**: Accepted and partially implemented; integration verification pending.
+- **Context & Problem Statement**:
+  Provider secrets need a reusable owner-scoped store that can later be extracted and integrated with KeyMint or another application. Returning a decrypted key to Kubes would still expose it to application processes and request plumbing.
+- **Decision Made**:
+  1. Implement `services/provider-credentials` as an independent Go service with its own PostgreSQL database and versioned HTTP/OpenAPI contract.
+  2. Encrypt provider credentials using AES-256-GCM and an externally supplied 32-byte master key. Bind ciphertext to the tenant, principal, provider, and credential ID.
+  3. Proxy OpenAI-compatible chat completions through the service. Decrypted keys exist only in the service's outbound provider request path and never return to Kubes or the browser.
+  4. Validate user JWTs against configured issuer, audience, and JWKS; map subject and tenant claims through configuration. Keep DeskID mapping in Kubes only.
+  5. Keep the service on a private network, with a service-owned PostgreSQL volume and no published database or service port by default.
+  6. Import a legacy browser key only after explicit user confirmation; remove its local copy after the backend confirms storage.
+- **Rationale**:
+  The proxy boundary keeps provider secret handling out of frontend and model-call code while the generic identity and provider contract makes the service reusable independently of Kubes and DeskID.
+- **Alternatives Considered & Why Rejected**:
+  - *Return decrypted credentials to the Kubes backend*: Rejected because it broadens plaintext secret exposure and encourages provider keys to flow through app memory, logs, and request wrappers.
+  - *Reuse Kubes SQLite tables*: Rejected because the credential service must own its database lifecycle and remain extractable as a microservice.
+  - *Use the existing KeyMint API without a contract adapter*: Rejected because its current API does not establish this service's tenant/principal ownership and proxy semantics.
+- **Consequences & System Impact**:
+  The service adds PostgreSQL and encryption-key operational requirements. The current code implements the main proxy path, but persistence/restart, real DeskID/provider traffic, scheduled-job identity delegation, key rotation, and production client TLS/authentication remain unverified or incomplete.
