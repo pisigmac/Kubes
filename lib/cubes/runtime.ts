@@ -18,6 +18,7 @@ import {
   updateSchedule,
 } from "../computer/schedule.ts";
 import type { ResourceScope } from "../auth/deskid.ts";
+import { trackCube } from "./busy.ts";
 
 
 function rosterText(cubes: Cube[]): string {
@@ -152,10 +153,17 @@ function handoffTool(caller: Cube, providerKey?: string, providerId?: string, us
       }
 
       const receiver = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, undefined, userAccessToken);
-      const result = await receiver.stream({
-        prompt: `Respond directly to the user. Do not mention that you were handed this.\n\n${goal}`,
-        abortSignal,
-      });
+      const release = trackCube(cube.id, cube.orgId || scope.orgId);
+      let result;
+      try {
+        result = await receiver.stream({
+          prompt: `Respond directly to the user. Do not mention that you were handed this.\n\n${goal}`,
+          abortSignal,
+        });
+      } catch (error) {
+        release();
+        throw error;
+      }
 
       let reply = "";
       const activity: string[] = [];
@@ -168,17 +176,21 @@ function handoffTool(caller: Cube, providerKey?: string, providerId?: string, us
         activity,
       });
 
-      for await (const part of result.fullStream) {
-        if (part.type === "text-delta") {
-          reply += part.text;
-          yield partial();
-        } else if (part.type === "tool-result" && part.toolName.startsWith("computer_")) {
-          activity.push(activityLine(part.output));
-          yield partial();
+      try {
+        for await (const part of result.fullStream) {
+          if (part.type === "text-delta") {
+            reply += part.text;
+            yield partial();
+          } else if (part.type === "tool-result" && part.toolName.startsWith("computer_")) {
+            activity.push(activityLine(part.output));
+            yield partial();
+          }
         }
+        if (!reply) reply = await result.text;
+        return partial();
+      } finally {
+        release();
       }
-      if (!reply) reply = await result.text;
-      return partial();
     },
     toModelOutput: ({ output }) => {
       const result = output as HandoffResult | undefined;
@@ -369,7 +381,12 @@ export async function runCubeInstruction(
   providerId?: string,
   userAccessToken?: string,
 ): Promise<string> {
+  const release = trackCube(cube.id, cube.orgId);
   const agent = buildCubeAgent(cube, { handoff: false, manage: false }, providerKey, providerId, { abortSignal: signal }, userAccessToken);
-  const result = await agent.generate({ prompt: instruction, abortSignal: signal });
-  return result.text;
+  try {
+    const result = await agent.generate({ prompt: instruction, abortSignal: signal });
+    return result.text;
+  } finally {
+    release();
+  }
 }

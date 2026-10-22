@@ -11,5 +11,5 @@ High-performance asynchronous multi-agent core for Kubes powered by LangGraph, F
 ## Quick Start
 ```bash
 cd services/agent-core
-uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn main:app --host 0.0.0.0 --port 28000 --reload
 ```

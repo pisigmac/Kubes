@@ -2,14 +2,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { createOpenAI } from "@ai-sdk/openai";
 import { credentialProxyFetch } from "./credential-service.ts";
+import { createGeminiModel } from "./gemini.ts";
+import { createAnthropicModel } from "./anthropic.ts";
+import { createGroqModel } from "./groq.ts";
+import { createOllamaModel } from "./ollama.ts";
+import { createDeepSeekModel } from "./deepseek.ts";
+import { createXaiModel } from "./xai.ts";
 
 export type ProviderId =
   | "gemini"
   | "groq"
-  | "openrouter"
+  | "anthropic"
+  | "deepseek"
   | "openai"
   | "xai"
   | "ollama"
+  | "kubemind"
   | "kuberoute"
   | "keymint"
   | "custom";
@@ -56,21 +64,21 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
       model_prefixes: [],
     },
     {
-      id: "kuberoute",
-      name: "KubeRoute Model Router",
+      id: "kubemind",
+      name: "KubeMind AI Governance Gateway",
       default_base_url: "http://localhost:9080/v1",
-      env_key_names: ["KUBEROUTE_API_KEY", "KUBEMIND_API_KEY"],
-      env_url_names: ["KUBEROUTE_GATEWAY_URL", "KUBEMIND_ROUTER_URL"],
+      env_key_names: ["KUBEMIND_API_KEY", "KUBEROUTE_API_KEY"],
+      env_url_names: ["KUBEMIND_GATEWAY_URL", "KUBEMIND_ROUTER_URL", "KUBEROUTE_GATEWAY_URL"],
       default_model: "gemini-3.8-flash",
       models: [
         "gemini-4-argon",
         "gemini-3.8-flash",
         "llama-4-70b-versatile",
-        "anthropic/claude-sonnet-5.5",
+        "claude-3-7-sonnet-20250219",
         "grok-4.7",
-        "gpt-6.1-sol",
+        "deepseek-reasoner",
       ],
-      model_prefixes: [],
+      model_prefixes: ["kubemind/"],
     },
     {
       id: "gemini",
@@ -106,30 +114,6 @@ const DEFAULT_CONFIG: ProvidersConfigFile = {
         "llama-3.1-8b-instant",
       ],
       model_prefixes: ["llama-", "gpt-oss-", "mixtral-", "deepseek-r1-distill", "qwen-"],
-    },
-    {
-      id: "openrouter",
-      name: "OpenRouter (Unified API)",
-      default_base_url: "https://openrouter.ai/api/v1",
-      env_key_names: ["OPENROUTER_API_KEY"],
-      env_url_names: ["OPENROUTER_BASE_URL"],
-      default_model: "anthropic/claude-sonnet-5.5",
-      models: [
-        "anthropic/claude-sonnet-5.5",
-        "anthropic/claude-opus-5.5",
-        "anthropic/claude-haiku-5.5",
-        "anthropic/claude-3.7-sonnet",
-        "anthropic/claude-3.7-sonnet:thinking",
-        "openai/gpt-6-astra",
-        "openai/gpt-6.1-sol",
-        "openai/o3-mini",
-        "deepseek/deepseek-v4.1-flash",
-        "deepseek/deepseek-r1",
-        "google/gemini-4-argon",
-        "google/gemini-3.8-flash",
-        "meta-llama/llama-4-70b-instruct",
-      ],
-      model_prefixes: ["/"],
     },
     {
       id: "openai",
@@ -201,7 +185,7 @@ export function getLoadedRegistry(): ProviderDefinition[] {
     matchModel: (modelId: string) => {
       const lower = modelId.toLowerCase();
       if (p.id === "keymint") return Boolean(process.env.KEYMINT_URL || process.env.KEYMINT_API_KEY);
-      if (p.id === "kuberoute") return Boolean(process.env.KUBEROUTE_GATEWAY_URL || process.env.KUBEMIND_ROUTER_URL);
+      if (p.id === "kubemind" || p.id === "kuberoute") return Boolean(process.env.KUBEMIND_GATEWAY_URL || process.env.KUBEMIND_ROUTER_URL || process.env.KUBEROUTE_GATEWAY_URL);
       if (!p.model_prefixes || p.model_prefixes.length === 0) return false;
       return p.model_prefixes.some((prefix) =>
         prefix === "/" ? lower.includes("/") : lower.startsWith(prefix.toLowerCase()),
@@ -507,7 +491,7 @@ export function alignModelForProvider(
   modelId: string,
   provider: ProviderJsonItem | ProviderDefinition | { id: string; defaultModel?: string; default_model?: string; models?: string[]; fallbackModels?: string[] }
 ): string {
-  if (provider.id === "custom" || provider.id === "openrouter") {
+  if (provider.id === "custom") {
     return modelId;
   }
 
@@ -566,7 +550,7 @@ export function getProviderStatusList() {
   const registry = getLoadedRegistry();
 
   return registry.map((provider) => {
-    const key = getProviderEnvKey(provider);
+    const key = getProviderEnvKey(provider) || getRuntimeProviderKey(provider.id);
     let configured = Boolean(key);
     let url = getProviderEnvURL(provider);
 
@@ -590,15 +574,35 @@ export function getProviderStatusList() {
   });
 }
 
+export function getFallbackProviders(
+  currentProviderId?: string,
+  configuredOnly = true
+): ProviderDefinition[] {
+  const statusList = getProviderStatusList();
+  const registry = getLoadedRegistry();
+  const preferenceOrder: ProviderId[] = ["groq", "gemini", "anthropic", "deepseek", "ollama", "openai", "kubemind", "keymint", "custom"];
+
+  let available = statusList
+    .filter((p) => (!configuredOnly || p.configured) && (!currentProviderId || p.id !== currentProviderId))
+    .map((p) => registry.find((r) => r.id === p.id))
+    .filter((r): r is ProviderDefinition => Boolean(r));
+
+  if (available.length === 0 && Boolean(process.env.PROVIDER_CREDENTIALS_URL?.trim())) {
+    available = registry.filter((r) => !currentProviderId || r.id !== currentProviderId);
+  }
+
+  return available.sort((a, b) => {
+    const idxA = preferenceOrder.indexOf(a.id);
+    const idxB = preferenceOrder.indexOf(b.id);
+    return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+  });
+}
+
 export function resolveProviderForModel(modelId: string): ResolvedProvider {
   if (process.env.OPENAI_BASE_URL?.trim()) {
     const explicitUrl = process.env.OPENAI_BASE_URL.trim();
     const explicitKey = resolveApiKey() || "none";
     const headers: Record<string, string> = {};
-    if (explicitUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "http://localhost:3000";
-      headers["X-Title"] = "Kubes";
-    }
 
     return {
       providerId: "custom",
@@ -618,11 +622,8 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
       const key = getProviderEnvKey(provider);
       if (key || provider.id === "ollama") {
         const headers: Record<string, string> = {};
-        if (provider.id === "openrouter") {
-          headers["HTTP-Referer"] = "http://localhost:3000";
-          headers["X-Title"] = "Kubes";
-        } else if (provider.id === "kuberoute") {
-          headers["X-KubeRoute-Client"] = "kubes-v1";
+        if (provider.id === "kubemind" || provider.id === "kuberoute") {
+          headers["X-KubeMind-Client"] = "kubes-v1";
         }
 
         return {
@@ -645,11 +646,8 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
       const key = getProviderEnvKey(activeProvider);
       if (key || activeProvider.id === "ollama") {
         const headers: Record<string, string> = {};
-        if (activeProvider.id === "openrouter") {
-          headers["HTTP-Referer"] = "http://localhost:3000";
-          headers["X-Title"] = "Kubes";
-        } else if (activeProvider.id === "kuberoute") {
-          headers["X-KubeRoute-Client"] = "kubes-v1";
+        if (activeProvider.id === "kubemind" || activeProvider.id === "kuberoute") {
+          headers["X-KubeMind-Client"] = "kubes-v1";
         }
 
         return {
@@ -669,10 +667,6 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
     const key = getProviderEnvKey(provider);
     if (key) {
       const headers: Record<string, string> = {};
-      if (provider.id === "openrouter") {
-        headers["HTTP-Referer"] = "http://localhost:3000";
-        headers["X-Title"] = "Kubes";
-      }
 
       return {
         providerId: provider.id,
@@ -701,14 +695,11 @@ export function resolveProviderForModel(modelId: string): ResolvedProvider {
 
 export function gatewayInfo(): { isGateway: boolean; provider: string; url: string } {
   const url = resolveBaseURL();
-  if (url.includes(":9080") || url.includes("kuberoute") || url.includes("kubemind")) {
-    return { isGateway: true, provider: "kuberoute", url };
+  if (url.includes(":9080") || url.includes("kubemind") || url.includes("kuberoute")) {
+    return { isGateway: true, provider: "kubemind", url };
   }
   if (url.includes(":8080") || url.includes("keymint")) {
     return { isGateway: true, provider: "keymint", url };
-  }
-  if (url.includes("openrouter.ai")) {
-    return { isGateway: true, provider: "openrouter", url };
   }
   return { isGateway: false, provider: "direct", url };
 }
@@ -741,9 +732,7 @@ export function resolveModelInvocation(options?: ModelInvocationOptions | string
       name: explicitProvider.name,
       baseURL: getProviderEnvURL(explicitProvider),
       apiKey: key || "credential-service-proxy",
-      headers: explicitProvider.id === "openrouter"
-        ? { "HTTP-Referer": "http://localhost:3000", "X-Title": "Kubes" }
-        : {},
+      headers: {},
       modelId: alignModelForProvider(requestedModel, explicitProvider),
     };
   }
@@ -759,11 +748,92 @@ export function resolveModelInvocation(options?: ModelInvocationOptions | string
 export function getLanguageModel(options?: ModelInvocationOptions | string) {
   const resolved = resolveModelInvocation(options);
   const invocationOptions: ModelInvocationOptions = typeof options === "object" && options ? options : {};
+  const hasDirectKey = Boolean(resolved.apiKey && resolved.apiKey !== "credential-service-proxy");
+
+  // 1. Direct Native SDK Execution:
+  // If direct API key is available (from options or environment), ALWAYS use native SDK adapters.
+  // This guarantees DeskID-authenticated users receive native protocol capabilities (prompt caching,
+  // multimodal streaming, reasoning tokens) rather than being downgraded through a proxy.
+  if (hasDirectKey) {
+    const apiKey = resolved.apiKey;
+
+    if (resolved.providerId === "gemini") {
+      return createGeminiModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    if (resolved.providerId === "anthropic") {
+      return createAnthropicModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    if (resolved.providerId === "groq") {
+      return createGroqModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    if (resolved.providerId === "ollama") {
+      return createOllamaModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    if (resolved.providerId === "deepseek") {
+      return createDeepSeekModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    if (resolved.providerId === "xai") {
+      return createXaiModel(resolved.modelId, {
+        apiKey,
+        baseURL: resolved.baseURL,
+        headers: resolved.headers,
+      });
+    }
+
+    const provider = createOpenAI({
+      apiKey,
+      baseURL: resolved.baseURL,
+      headers: resolved.headers,
+      name: `kubes-${resolved.providerId}`,
+      fetch: createResilientFetch(resolved.providerId),
+    });
+
+    return provider.chat(resolved.modelId);
+  }
+
+  // 2. Saved-Credential Proxy Path (Fallback when no direct key is configured in environment):
   if (process.env.PROVIDER_CREDENTIALS_URL?.trim()) {
     if (!invocationOptions.userAccessToken) {
       throw new Error("Sign in to use your saved provider credentials.");
     }
     const providerId = invocationOptions.providerId || resolved.providerId;
+
+    if (providerId === "anthropic") {
+      throw new Error(
+        "Anthropic Claude requires native Messages API credentials. Please set ANTHROPIC_API_KEY in .env.local or enter your Anthropic API key in the Providers modal.",
+      );
+    }
+    if (providerId === "gemini") {
+      throw new Error(
+        "Google Gemini requires native Google AI Studio credentials. Please set GEMINI_API_KEY in .env.local or enter your Gemini API key in the Providers modal.",
+      );
+    }
+
     const serviceURL = process.env.PROVIDER_CREDENTIALS_URL.trim().replace(/\/$/, "");
     const provider = createOpenAI({
       apiKey: "credential-service-proxy",
@@ -777,22 +847,9 @@ export function getLanguageModel(options?: ModelInvocationOptions | string) {
     return provider.chat(resolved.modelId);
   }
 
-  const apiKey = resolved.apiKey;
-  if (!apiKey) {
-    throw new Error(
-      "No active AI Provider configured. Please set GEMINI_API_KEY (Free via Google AI Studio), GROQ_API_KEY (Free via Groq), OPENROUTER_API_KEY, or OPENAI_API_KEY in .env.local or the Providers modal.",
-    );
-  }
-
-  const provider = createOpenAI({
-    apiKey,
-    baseURL: resolved.baseURL,
-    headers: resolved.headers,
-    name: `kubes-${resolved.providerId}`,
-    fetch: createResilientFetch(resolved.providerId),
-  });
-
-  return provider.chat(resolved.modelId);
+  throw new Error(
+    "No active AI Provider configured. Please set GEMINI_API_KEY (Free via Google AI Studio), GROQ_API_KEY (Free via Groq), or OPENAI_API_KEY in .env.local or the Providers modal.",
+  );
 }
 
 export function languageModel(modelId: string, explicitApiKey?: string, explicitProviderId?: string) {

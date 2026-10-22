@@ -8,7 +8,7 @@ export interface KubemindSearchResult {
 }
 
 export function getKubemindUrl(): string {
-  return process.env.KUBEMIND_URL || "http://127.0.0.1:9090";
+  return process.env.KUBEMIND_URL || process.env.KUBEMIND_MIND_URL || "http://127.0.0.1:9081";
 }
 
 /**

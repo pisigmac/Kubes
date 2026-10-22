@@ -14,7 +14,7 @@ import {
   createSwarmPlan,
 } from "./swarm.ts";
 import { synthesizeSwarmPlan } from "./synthesizer.ts";
-import { isRateLimitOrQuotaError, resolveModelInvocation } from "../ai/provider.ts";
+import { getFallbackProviders, isRateLimitOrQuotaError, resolveModelInvocation } from "../ai/provider.ts";
 import type { ResourceScope } from "../auth/deskid.ts";
 import type { Cube } from "./types.ts";
 
@@ -35,10 +35,17 @@ export interface SwarmRunnerOptions {
   scope?: ResourceScope | string;
   providerKey?: string;
   providerId?: string;
+  fallbackProviders?: string[];
   userAccessToken?: string;
   abortSignal?: AbortSignal;
+  maxConcurrency?: number;
   onEvent?: (event: SwarmRunnerEvent) => void | Promise<void>;
-  executor?: (task: SwarmTask, prompt: string, signal: AbortSignal) => Promise<string>;
+  executor?: (
+    task: SwarmTask,
+    prompt: string,
+    signal: AbortSignal,
+    fallbackAttempt?: { providerId: string; model: string }
+  ) => Promise<string>;
 }
 
 /**
@@ -46,6 +53,7 @@ export interface SwarmRunnerOptions {
  */
 export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<SwarmPlan> {
   const { plan, scope, abortSignal, onEvent, executor, providerKey, providerId, userAccessToken } = options;
+  const concurrencyLimit = Math.max(1, options.maxConcurrency ?? 2);
 
   const validation = validateSwarmPlan(plan);
   if (!validation.valid) {
@@ -88,8 +96,8 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
       taskIds: batchTaskIds,
     });
 
-    // Execute all tasks in the current batch concurrently
-    const taskPromises = currentBatch.map(async (taskDef) => {
+    // Execute all tasks in the current batch with concurrency bounded by semaphore
+    const executeTask = async (taskDef: SwarmTask) => {
       // Re-read latest state of task from currentPlan (in case it was skipped due to earlier failure)
       const freshTask = currentPlan.tasks.find((t) => t.id === taskDef.id);
       if (!freshTask || freshTask.status === "skipped") {
@@ -116,6 +124,14 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
         title: taskDef.title,
       });
 
+      const getCandidates = (currId?: string) => {
+        if (options.fallbackProviders && options.fallbackProviders.length > 0) {
+          const all = getFallbackProviders(undefined, false);
+          return all.filter((r) => options.fallbackProviders!.includes(r.id) && r.id !== currId);
+        }
+        return getFallbackProviders(currId, true);
+      };
+
       let targetCube: Cube | undefined;
       try {
         // Build prompt with upstream context if task had dependencies
@@ -133,20 +149,86 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
 
         let outputText = "";
         if (executor) {
-          outputText = await executor(taskDef, prompt, abortController.signal);
+          try {
+            outputText = await executor(taskDef, prompt, abortController.signal);
+          } catch (execErr) {
+            if (isRateLimitOrQuotaError(execErr)) {
+              const fallbackCandidates = getCandidates(providerId);
+              let fallbackSuccess = false;
+              for (const candidate of fallbackCandidates) {
+                try {
+                  await emitEvent(onEvent, {
+                    type: "task_progress",
+                    taskId: taskDef.id,
+                    message: `[Failover] Primary provider '${providerId || "default"}' rate-limited. Retrying with '${candidate.name}' (${candidate.defaultModel})...`,
+                  });
+                  outputText = await executor(taskDef, prompt, abortController.signal, {
+                    providerId: candidate.id,
+                    model: candidate.defaultModel,
+                  });
+                  fallbackSuccess = true;
+                  break;
+                } catch (candidateErr) {
+                  if (isRateLimitOrQuotaError(candidateErr)) continue;
+                  throw candidateErr;
+                }
+              }
+              if (!fallbackSuccess) throw execErr;
+            } else {
+              throw execErr;
+            }
+          }
         } else {
           targetCube = getCubeBySlug(taskDef.assignedCube, scope);
           if (!targetCube) {
             throw new Error(`Assigned specialist Cube '${taskDef.assignedCube}' not found.`);
           }
-          outputText = await runCubeInstruction(
-            targetCube,
-            prompt,
-            abortController.signal,
-            providerKey,
-            providerId,
-            userAccessToken,
-          );
+          try {
+            outputText = await runCubeInstruction(
+              targetCube,
+              prompt,
+              abortController.signal,
+              providerKey,
+              providerId,
+              userAccessToken,
+            );
+          } catch (runErr) {
+            if (isRateLimitOrQuotaError(runErr)) {
+              const currentInvocation = resolveModelInvocation({
+                modelId: targetCube.model,
+                providerId,
+                providerKey,
+              });
+              const fallbackCandidates = getCandidates(currentInvocation.providerId);
+              let fallbackSuccess = false;
+              for (const candidate of fallbackCandidates) {
+                try {
+                  await emitEvent(onEvent, {
+                    type: "task_progress",
+                    taskId: taskDef.id,
+                    message: `[Failover] Primary provider '${currentInvocation.providerId}' rate-limited. Retrying with '${candidate.name}' (${candidate.defaultModel})...`,
+                  });
+                  const fallbackCube: Cube = { ...targetCube, model: candidate.defaultModel };
+                  outputText = await runCubeInstruction(
+                    fallbackCube,
+                    prompt,
+                    abortController.signal,
+                    undefined,
+                    candidate.id,
+                    userAccessToken,
+                  );
+                  fallbackSuccess = true;
+                  break;
+                } catch (candidateErr) {
+                  if (isRateLimitOrQuotaError(candidateErr)) continue;
+                  throw candidateErr;
+                }
+              }
+              if (!fallbackSuccess) throw runErr;
+            } else {
+              throw runErr;
+            }
+          }
         }
 
         const durationMs = Date.now() - startTime;
@@ -205,9 +287,20 @@ export async function executeSwarmPlan(options: SwarmRunnerOptions): Promise<Swa
           durationMs,
         });
       }
-    });
+    };
 
-    await Promise.allSettled(taskPromises);
+    const executing = new Set<Promise<void>>();
+    for (const taskDef of currentBatch) {
+      if (abortController.signal.aborted) break;
+      const promise = Promise.resolve().then(() => executeTask(taskDef));
+      executing.add(promise);
+      const clean = () => executing.delete(promise);
+      promise.then(clean, clean);
+      if (executing.size >= concurrencyLimit) {
+        await Promise.race(executing);
+      }
+    }
+    await Promise.allSettled(Array.from(executing));
   }
 
   // Generate executive synthesis if any tasks succeeded

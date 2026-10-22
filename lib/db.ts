@@ -21,17 +21,19 @@ function migrate(database: Database.Database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS cubes (
       id TEXT PRIMARY KEY,
-      slug TEXT NOT NULL UNIQUE,
+      slug TEXT NOT NULL,
       name TEXT NOT NULL,
       pain_point TEXT NOT NULL,
       instructions TEXT NOT NULL,
       model TEXT NOT NULL,
       is_maestro INTEGER NOT NULL DEFAULT 0,
-      seed_key TEXT UNIQUE,
+      seed_key TEXT,
       org_id TEXT NOT NULL DEFAULT 'default',
       user_id TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      UNIQUE (org_id, slug),
+      UNIQUE (org_id, seed_key)
     );
 
     CREATE TABLE IF NOT EXISTS threads (
@@ -123,6 +125,11 @@ function migrate(database: Database.Database) {
     addColumnIfNotExists(database, table, "org_id", "TEXT NOT NULL DEFAULT 'default'");
     addColumnIfNotExists(database, table, "user_id", "TEXT");
   }
+  migrateCubeTenantUniqueness(database);
+  database.exec(`
+    DELETE FROM messages WHERE thread_id NOT IN (SELECT id FROM threads);
+    DELETE FROM schedules WHERE cube_id NOT IN (SELECT id FROM cubes);
+  `);
   addColumnIfNotExists(database, "schedules", "timezone", "TEXT NOT NULL DEFAULT 'UTC'");
   addColumnIfNotExists(database, "schedules", "catchup_policy", "TEXT NOT NULL DEFAULT 'skip_missed'");
 
@@ -140,6 +147,53 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS digests_org_created ON digests (org_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS digests_cube ON digests (cube_id, created_at DESC);
   `);
+}
+
+function migrateCubeTenantUniqueness(database: Database.Database) {
+  const indexes = database.pragma("index_list(cubes)") as { name: string; unique: number }[];
+  const hasGlobalUnique = indexes.some((index) => {
+    if (index.unique !== 1) return false;
+    const columns = database.pragma(`index_info('${index.name.replaceAll("'", "''")}')`) as { name: string | null }[];
+    return columns.length === 1 && (columns[0]?.name === "slug" || columns[0]?.name === "seed_key");
+  });
+  if (!hasGlobalUnique) return;
+
+  database.pragma("foreign_keys = OFF");
+  try {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE cubes_replacement (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL,
+        name TEXT NOT NULL,
+        pain_point TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        model TEXT NOT NULL,
+        is_maestro INTEGER NOT NULL DEFAULT 0,
+        seed_key TEXT,
+        org_id TEXT NOT NULL DEFAULT 'default',
+        user_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (org_id, slug),
+        UNIQUE (org_id, seed_key)
+      );
+      INSERT INTO cubes_replacement
+        (id, slug, name, pain_point, instructions, model, is_maestro, seed_key, org_id, user_id, created_at, updated_at)
+      SELECT id, slug, name, pain_point, instructions, model, is_maestro, seed_key, org_id, user_id, created_at, updated_at
+      FROM cubes;
+      DROP TABLE cubes;
+      ALTER TABLE cubes_replacement RENAME TO cubes;
+      COMMIT;
+    `);
+  } catch (error) {
+    try { database.exec("ROLLBACK"); } catch { /* The transaction may already have rolled back. */ }
+    throw error;
+  } finally {
+    database.pragma("foreign_keys = ON");
+  }
+  const violations = database.pragma("foreign_key_check('cubes')") as unknown[];
+  if (violations.length) throw new Error("Cube tenant uniqueness migration left invalid foreign keys.");
 }
 
 function seed(database: Database.Database) {

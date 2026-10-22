@@ -1,11 +1,18 @@
 # Changelog
 
+## Unreleased
+- Added the DeskID browser sign-in page and server-side login, refresh, and logout flow. Session tokens use HttpOnly cookies, and Kubes verifies access tokens before accepting a session.
+- Added organization-scoped Cube slug/seed-key uniqueness and idempotent starter Cube creation for DeskID organizations.
+
 All notable changes to the Kubes Autonomous AI Platform are documented in this file.
 
 ## Unreleased
 
 ### Added
 - **Independent Provider Credentials Service** (`services/provider-credentials/`): Go service with PostgreSQL-owned persistence, configurable JWT/JWKS claim mapping, AES-256-GCM encryption, authenticated provider testing, and OpenAI-compatible streaming proxying. Kubes provider settings, chat, handoff, and swarm paths can use the private service; browser-key migration is consent-based. Runtime Compose and real DeskID/provider verification remain pending.
+
+### Changed
+- **Allocator-managed Kubes host ports**: Web and agent core now prefer host ports `23000` and `28000`; Docker and local startup use `port-alloc` to pick free ports, while container-internal ports remain `3000` and `8000`.
 
 ## [1.6.0] - 2026-10-13
 

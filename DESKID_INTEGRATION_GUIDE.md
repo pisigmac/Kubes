@@ -148,7 +148,7 @@ Kubes implements token verification in `lib/auth/deskid.ts` using the `jose` lib
 - **API Requests (`/api/*`):** Missing or invalid tokens immediately return `401 Unauthorized` with JSON error payloads.
 - **Web Requests:** Missing or invalid tokens redirect browser users to DeskID login:
   ```text
-  http://127.0.0.1:8090/login?redirect=http://127.0.0.1:3000/...
+  http://127.0.0.1:8090/login?redirect=http://127.0.0.1:23000/...
   ```
 - **Token Sources:** Inspects `Authorization: Bearer <token>` header first, falling back to the `deskid_session` cookie.
 
@@ -279,27 +279,27 @@ echo "Issued JWT: $TOKEN"
 ### 3. Run Kubes Auth & Tenancy Test Suite
 Execute the existing automated unit and regression tests in Kubes:
 ```bash
-cd /home/oh20210736-ud/Documents/WorkSpace/bots
+cd <kubes-repository-root>
 node --experimental-strip-types --test lib/auth/deskid.test.ts lib/auth/tenant_isolation.test.ts
 ```
 
 ### 4. Test API Route Protection
 - **Request with valid token:**
   ```bash
-  curl -i http://127.0.0.1:3000/api/cubes \
+  curl -i http://127.0.0.1:23000/api/cubes \
     -H "Authorization: Bearer $TOKEN"
   # Expect: HTTP/1.1 200 OK
   ```
 
 - **Request without token:**
   ```bash
-  curl -i http://127.0.0.1:3000/api/cubes
+  curl -i http://127.0.0.1:23000/api/cubes
   # Expect: HTTP/1.1 401 Unauthorized
   ```
 
 - **Request with forged/tampered token:**
   ```bash
-  curl -i http://127.0.0.1:3000/api/cubes \
+  curl -i http://127.0.0.1:23000/api/cubes \
     -H "Authorization: Bearer invalid.jwt.token"
   # Expect: HTTP/1.1 401 Unauthorized
   ```

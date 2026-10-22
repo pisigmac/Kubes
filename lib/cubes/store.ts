@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import { db } from "../db.ts";
-import { seedByKey } from "./catalog.ts";
+import { seedByKey, SEED_CUBES } from "./catalog.ts";
 import { defaultModel } from "../ai/provider.ts";
 import type { Cube, Thread } from "./types.ts";
 import { getAuthMode, type ResourceScope } from "../auth/deskid.ts";
@@ -97,16 +97,46 @@ function slugify(name: string): string {
   return base || "cube";
 }
 
-function uniqueSlug(name: string): string {
+function uniqueSlug(name: string, orgId: string): string {
   const base = slugify(name);
   const database = db();
-  const taken = database.prepare("SELECT 1 FROM cubes WHERE slug = ?").pluck();
-  if (!taken.get(base)) return base;
+  const taken = database.prepare("SELECT 1 FROM cubes WHERE slug = ? AND org_id = ?").pluck();
+  if (!taken.get(base, orgId)) return base;
   for (let i = 2; i < 1000; i += 1) {
     const candidate = `${base}-${i}`;
-    if (!taken.get(candidate)) return candidate;
+    if (!taken.get(candidate, orgId)) return candidate;
   }
   throw new HttpError("Could not find a free slug.", 409);
+}
+
+export function ensureTenantSeedCubes(scope: ResourceScope | string): Cube[] {
+  const resolved = resolveScope(scope);
+  const database = db();
+  const existing = new Set(
+    (database.prepare("SELECT slug FROM cubes WHERE org_id = ?").all(resolved.orgId) as { slug: string }[]).map((row) => row.slug),
+  );
+  const now = new Date().toISOString();
+  const model = defaultModel();
+  const insert = database.prepare(`
+    INSERT OR IGNORE INTO cubes (
+      id, slug, name, pain_point, instructions, model, is_maestro, seed_key, org_id, user_id, created_at, updated_at
+    ) VALUES (
+      @id, @slug, @name, @painPoint, @instructions, @model, @isMaestro, @seedKey, @orgId, @userId, @createdAt, @updatedAt
+    )
+  `);
+  const seed = database.transaction(() => {
+    for (const cube of SEED_CUBES) {
+      if (existing.has(cube.slug)) continue;
+      insert.run({
+        id: crypto.randomUUID(), slug: cube.slug, name: cube.name, painPoint: cube.painPoint,
+        instructions: cube.instructions, model, isMaestro: cube.isMaestro ? 1 : 0,
+        seedKey: cube.slug, orgId: resolved.orgId, userId: resolved.userId,
+        createdAt: now, updatedAt: now,
+      });
+    }
+  });
+  seed();
+  return listCubes(resolved);
 }
 
 function cleanText(value: string, label: string, max: number): string {
@@ -168,7 +198,7 @@ export function createCube(input: CubeInput): Cube {
   const now = new Date().toISOString();
   const cube: Cube = {
     id: crypto.randomUUID(),
-    slug: uniqueSlug(name),
+    slug: uniqueSlug(name, orgId),
     name,
     painPoint,
     instructions,

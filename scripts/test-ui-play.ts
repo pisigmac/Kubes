@@ -44,11 +44,7 @@ async function findActiveWebPort(): Promise<number> {
   const candidates = [
     pidPort,
     parseInt(process.env.PORT || "", 10),
-    3000,
-    3001,
-    3002,
-    3003,
-    3004,
+    ...Array.from({ length: 101 }, (_, index) => 23000 + index),
   ].filter((p): p is number => p !== null && !isNaN(p) && p > 0);
 
   for (const p of candidates) {
@@ -64,7 +60,7 @@ async function findActiveWebPort(): Promise<number> {
       // try next candidate
     }
   }
-  return pidPort || 3000;
+  return pidPort || 23000;
 }
 
 async function main() {

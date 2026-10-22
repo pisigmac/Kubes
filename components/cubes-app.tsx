@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { UIMessage } from "ai";
 import { ComputerPane, type ComputerSnapshot } from "@/components/computer-pane";
 import { CubeAvatar, CubeMark } from "@/components/cube-mark";
@@ -42,13 +43,16 @@ export function CubesApp({
   initialMessages,
   initialModels,
   initialSchedules,
+  deskIDAuth,
 }: {
   initialCubes: Cube[];
   initialThread: Thread;
   initialMessages: UIMessage[];
   initialModels: string[];
   initialSchedules: Schedule[];
+  deskIDAuth: boolean;
 }) {
+  const router = useRouter();
   const [cubes, setCubes] = useState(initialCubes);
   const [selectedId, setSelectedId] = useState(initialThread.cubeId);
   const [loaded, setLoaded] = useState<LoadedThread>({
@@ -68,6 +72,32 @@ export function CubesApp({
   const [computerRevision, setComputerRevision] = useState(0);
   const [snapshot, setSnapshot] = useState<ComputerSnapshot | null>(null);
   const [watchSlug, setWatchSlug] = useState<string | null>(null);
+  const [busyCubeIds, setBusyCubeIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const refreshBusyCubes = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch("/api/cubes/busy", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { cubeIds?: string[] };
+        if (active) setBusyCubeIds(body.cubeIds ?? []);
+      } catch {
+        // Activity is best-effort; a temporary poll failure should not disrupt chat.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refreshBusyCubes();
+    const timer = window.setInterval(() => void refreshBusyCubes(), 1200);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const selected = cubes.find((cube) => cube.id === selectedId) ?? null;
   const watched = (watchSlug ? cubes.find((cube) => cube.slug === watchSlug) : selected) ?? selected;
@@ -172,6 +202,7 @@ export function CubesApp({
                   key={cube.id}
                   cube={cube}
                   selected={cube.id === selectedId && !creating}
+                  busy={busyCubeIds.includes(cube.id)}
                   onSelect={(id) => void selectCube(id)}
                 />
               ))}
@@ -185,6 +216,7 @@ export function CubesApp({
                   key={cube.id}
                   cube={cube}
                   selected={cube.id === selectedId && !creating}
+                  busy={busyCubeIds.includes(cube.id)}
                   onSelect={(id) => void selectCube(id)}
                 />
               ))}
@@ -272,6 +304,16 @@ export function CubesApp({
             >
               <span className="text-xs">🔑</span> Providers
             </button>
+            {deskIDAuth ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  await fetch("/api/auth/logout", { method: "POST" });
+                  router.push("/login");
+                }}
+                className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-sm text-white/80 hover:bg-white/5"
+              >Sign out</button>
+            ) : null}
           </div>
           {selected && !creating ? (
             <div className="hidden w-44 min-w-0 md:block">
@@ -393,13 +435,15 @@ export function CubesApp({
         </div>
       ) : null}
 
-      <ProviderModal
-        isOpen={providerOpen}
-        onClose={() => setProviderOpen(false)}
-        onModelSelect={(model) => {
-          if (selected) void patchModel(selected, model);
-        }}
-      />
+      {providerOpen ? (
+        <ProviderModal
+          isOpen={providerOpen}
+          onClose={() => setProviderOpen(false)}
+          onModelSelect={(model) => {
+            if (selected) void patchModel(selected, model);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -412,10 +456,12 @@ function sortCubes(a: Cube, b: Cube) {
 function CubeButton({
   cube,
   selected,
+  busy,
   onSelect,
 }: {
   cube: Cube;
   selected: boolean;
+  busy: boolean;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -426,10 +472,20 @@ function CubeButton({
         selected ? "bg-white/[0.07]" : "hover:bg-white/[0.04]"
       }`}
     >
-      <CubeAvatar slug={cube.slug} />
+      <span className="relative shrink-0">
+        <CubeAvatar slug={cube.slug} />
+        {busy ? (
+          <span
+            aria-label="Working"
+            className="absolute -right-0.5 -bottom-0.5 h-3 w-3 animate-spin rounded-full border-2 border-[#0c0c0e] border-t-emerald-300"
+          />
+        ) : null}
+      </span>
       <span className="min-w-0">
         <span className="block truncate text-sm">{cube.name}</span>
-        <span className="block truncate text-xs text-white/40">{cube.painPoint}</span>
+        <span className={`block truncate text-xs ${busy ? "text-emerald-300" : "text-white/40"}`}>
+          {busy ? "Working…" : cube.painPoint}
+        </span>
       </span>
     </button>
   );

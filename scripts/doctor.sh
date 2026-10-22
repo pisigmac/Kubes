@@ -93,8 +93,8 @@ PORT_ALLOC_BIN="$(command -v port-alloc 2>/dev/null || ( [[ -x "${HOME}/.local/b
 if [[ -n "${PORT_ALLOC_BIN}" ]]; then
   echo "  🟢 [OK] port-alloc CLI active: ${PORT_ALLOC_BIN}"
 else
-  echo "  🟡 [WARN] port-alloc CLI not in PATH; falling back to static default ports."
-  WARNINGS=$((WARNINGS + 1))
+  echo "  🔴 [ERROR] port-alloc CLI is required for dynamic Kubes port allocation. Install it with: bash tools/port-allocator/install.sh"
+  ERRORS=$((ERRORS + 1))
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

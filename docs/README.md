@@ -32,5 +32,5 @@ make seed
 make start
 
 # 5. Open Web UI
-open http://localhost:3000
+make start  # Open the URL printed by the command (preferred host port: 23000)
 ```

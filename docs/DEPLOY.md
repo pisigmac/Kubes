@@ -32,6 +32,8 @@ Ideal for multi-tenant internal deployments and team collaboration.
 ./scripts/stop_all.sh --docker
 ```
 
+Kubes prefers host ports `23000` (web) and `28000` (agent core). The startup script asks `port-alloc` to reserve these ports and uses the allocator's chosen ports in Docker Compose. Use the startup script instead of invoking `docker compose up` directly when you want allocator-managed ports. Container-internal ports remain `3000` and `8000`.
+
 ---
 
 ## Production Readiness Checklist

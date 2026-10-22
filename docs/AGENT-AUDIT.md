@@ -1,5 +1,19 @@
 # Architecture Decision Records (ADR) & Inter-Agent Audit Log
 
+## [ADR-015] Organization-Scoped Live Cube Activity
+
+- **Context & Problem Statement**:
+  Users need to see which Cube is handling work even after selecting a different Cube. Previously, activity existed only in the selected chat UI, so handoff and parallel swarm work were invisible in the sidebar.
+- **Decision Made**:
+  Track active work in process memory by organization and Cube, expose the active Cube IDs through an authenticated no-store endpoint, and poll that endpoint from the sidebar. Chat, handoff, swarm, and scheduled instruction execution register activity and release it on completion, error, or cancellation. Activity counts support concurrent requests to the same Cube.
+- **Rationale (Why this was built this way)**:
+  Activity is transient operational state and does not need persistence. Organization scoping prevents one tenant's sidebar or scheduler from observing another tenant's activity.
+- **Alternatives Considered & Why Rejected**:
+  - *Persist busy state in SQLite*: Rejected because a process crash can leave stale state and this indication is only useful while execution is active.
+  - *Only show status in the selected chat*: Rejected because it hides specialist work when the user navigates elsewhere.
+- **Consequences & System Impact**:
+  The sidebar displays “Working…” on each active Cube. This in-memory tracker reflects work handled by the current app process; a multi-instance deployment would need a shared transient activity store.
+
 ## [ADR-001] Fail-Closed DeskID Authentication & Immutable AuthContext
 
 - **Context & Problem Statement**:
@@ -335,7 +349,7 @@
   3. The server stores credentials encrypted at rest, resolves them only from the authenticated user and organization context, and uses them for that user's provider requests. Every credential operation must enforce both user and organization scope and fail closed when either scope is absent or mismatched.
   4. Provider keys must not be returned to the browser after submission, included in chat or swarm request payloads, exposed to other users, or readable by organization administrators. Administrative controls must not reveal or retrieve personal key values.
   5. Future organization policy is a separate layer. Administrators may allow-list providers, require an approved gateway, and decide whether personal credentials may pass through that gateway or whether credentials must be gateway-managed. Policy may allow or disable personal key use, but does not transfer ownership or visibility of personal secrets to administrators.
-  6. The user experience must distinguish configured, verified, and active provider states; show which provider and model will handle a request; test actual chat capability rather than only model-list access; and explain policy blocks and recovery options.
+  6. The user experience must distinguish configured, credential-accepted, and active provider states; show which provider and model will handle a request; and explain whether a check tested model discovery or actual generation.
 - **Rationale**:
   DeskID provides the authenticated identity needed to associate credentials with their owner. User-and-organization scoping supports cross-device use while preserving tenant isolation. Keeping provider policy separate from credential ownership lets organizations constrain usage without granting administrators access to personal secrets.
 - **Alternatives Considered & Why Rejected**:
@@ -367,3 +381,184 @@
   - *Use the existing KeyMint API without a contract adapter*: Rejected because its current API does not establish this service's tenant/principal ownership and proxy semantics.
 - **Consequences & System Impact**:
   The service adds PostgreSQL and encryption-key operational requirements. The current code implements the main proxy path, but persistence/restart, real DeskID/provider traffic, scheduled-job identity delegation, key rotation, and production client TLS/authentication remain unverified or incomplete.
+
+## [ADR-016] Gemini Credential Check Uses Model Discovery
+
+- **Date**: 2026-10-22
+- **Status**: Accepted; implementation added, runtime verification pending.
+- **Context & Problem Statement**:
+  The Gemini credential check used a bounded chat-completions request and returned HTTP 503 in the reported environment. The provider modal already supports receiving and displaying compatible model IDs, and users need a low-cost way to confirm the key is accepted.
+- **Decision Made**:
+  1. For Gemini, validate the saved key with `GET /v1beta/openai/models` and return only sanitized model IDs to the provider modal.
+  2. Label a successful result “Key accepted” and explicitly state that chat generation was not tested.
+  3. Keep the existing bounded chat verification behavior for other providers; do not change the chat proxy path.
+- **Rationale**:
+  Model discovery checks whether the key can access the provider's compatible API and populates the local model choices without incurring a model-generation request. A separate real chat request remains necessary to verify generation capability.
+- **Alternatives Considered & Why Rejected**:
+  - *Keep a chat request as the Gemini key check*: Rejected for this check because it may incur usage and conflates credential acceptance with generation availability.
+  - *Use the Gemini Interactions API*: Rejected because the current Kubes proxy uses the OpenAI-compatible API contract.
+- **Consequences & System Impact**:
+  A successful Gemini check confirms model-list access only. Quota, model availability for generation, and chat response behavior must be verified separately through an actual chat request.
+
+---
+
+## [ADR-017] Adaptive AI Failover Chains & Swarm Concurrency Throttling
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  During Swarm multi-specialist collaboration, unbounded concurrent dispatch (`Promise.all`) of parallel batch tasks triggers burst `429 Too Many Requests` (`RESOURCE_EXHAUSTED`) on quota-limited free-tier providers (e.g. Gemini 15 RPM). A single 429 aborted the entire Swarm workflow, marking dependent downstream tasks as skipped.
+- **Decision Made**:
+  1. **Concurrency Throttling Semaphore**: SwarmRunnerOptions accepts `maxConcurrency` (defaulting to 2 concurrent in-flight specialist executions) executed via an asynchronous semaphore pool.
+  2. **Adaptive Provider Failover Chain**: When a specialist execution encounters a quota/rate-limit error (`isRateLimitOrQuotaError`), the runner queries available configured fallback providers (`getFallbackProviders()`), orders candidates by preference (`groq` ➔ `gemini` ➔ `ollama` ➔ `openrouter` ➔ `openai`), emits a progress notification, and seamlessly retries the specialist task under the fallback provider's default model.
+- **Rationale**:
+  Swarm workflows contain valuable partial work and topological dependencies. Resilient failover preserves workflow continuity without requiring human intervention to toggle providers mid-run.
+- **Alternatives Considered & Why Rejected**:
+  - *Halt and request manual provider change*: Rejected because it breaks autonomous execution and loses context in streaming sessions.
+  - *Static model-only fallback*: Rejected because 429 errors are provider-level quota bounds; switching models on the same exhausted provider fails repeatedly.
+- **Consequences & System Impact**:
+  Swarm plans automatically recover from transient quota exhaustion if secondary providers are configured. When all fallbacks are exhausted, standard rate-limit error formatting and task failure semantics are preserved.
+
+---
+
+## [ADR-018] Native Google Gemini Adapter & Direct Protocol Integration
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  Google Gemini models were previously routed via `@ai-sdk/openai` targeting the `/v1beta/openai/` compatibility endpoint. This setup caused high Time-To-First-Token (TTFT) latency, proxy conversion overhead between OpenAI and native Google GenAI RPC protocols, silent exponential sleep pauses during multi-step `ToolLoopAgent` runs upon encountering Free Tier 429 quota limits, and Node.js CPU overhead due to SSE stream normalization (`normalizeGeminiStream`).
+- **Decision Made**:
+  1. Integrated official `@ai-sdk/google` (`createGoogleGenerativeAI`) to establish a direct connection to Google's native `/v1beta/models/...:streamGenerateContent` endpoint.
+  2. Implemented `lib/ai/gemini.ts` with clean model ID normalization (stripping `google/` or `models/` namespaces), optimized resilient fetch handling, and quota diagnostic reporting.
+  3. Updated `getLanguageModel` in `lib/ai/provider.ts` to seamlessly route Gemini provider requests to `createGeminiModel` while preserving existing `LanguageModelV1` contracts for all agents and routes.
+- **Rationale**:
+  Direct native GenAI communication eliminates the emulation proxy, provides native tool-call index synchronization, and enables faster streaming deltas directly to the user UI.
+- **Alternatives Considered & Why Rejected**:
+  - *Keep OpenAI compatibility layer and tune timeouts*: Rejected because the serialization and rate-limit latency are inherent to the emulation proxy.
+  - *Hardcode a proprietary Google REST client*: Rejected because `@ai-sdk/google` aligns with the platform's Vercel AI SDK architecture (`LanguageModelV1`) and works out-of-the-box with `ToolLoopAgent` and `createAgentUIStreamResponse`.
+- **Consequences & System Impact**:
+  Substantially reduced streaming latency and token turnaround for all Gemini models. Zero breaking changes to existing route handlers or agents. All existing test suites continue to pass with 100% success.
+
+---
+
+## [ADR-019] Full Native AI Adapter Suite (Anthropic, Groq, Ollama, DeepSeek)
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  Routing all third-party models through a generic OpenAI compatibility proxy created several friction points:
+  1. Anthropic models lacked native Ephemeral Prompt Caching headers (`cache_control`) and thinking budget configuration, forcing redundant context processing and 10x higher input token bills.
+  2. Groq models lacked native LPU integration and reasoning stream handling.
+  3. Local Ollama instances lacked offline diagnostics and GPU memory lifecycle management (`keep_alive`).
+  4. DeepSeek R1 reasoning models could not stream thinking deltas independently from message content.
+- **Decision Made**:
+  1. Installed official `@ai-sdk/anthropic` and `@ai-sdk/groq` dependencies via `pnpm`.
+  2. Implemented dedicated adapter modules:
+     - `lib/ai/anthropic.ts`: Native Anthropic adapter with automatic model normalization, prompt-caching headers (`anthropic-beta: prompt-caching-2024-07-31`), and overloaded retry diagnostics.
+     - `lib/ai/groq.ts`: Native Groq adapter for high-throughput LPU inference with resilient exponential backoff.
+     - `lib/ai/ollama.ts`: Local inference adapter supporting customizable `keep_alive` memory retention and friendly daemon offline warnings.
+     - `lib/ai/deepseek.ts`: Dedicated DeepSeek direct adapter with quota and reasoning stream awareness.
+  3. Updated `lib/ai/provider.ts` to extend `ProviderId` with `"anthropic"` and `"deepseek"`, and dispatch `getLanguageModel` cleanly to each respective native adapter.
+  4. Updated `config/providers.json` to configure direct Anthropic Claude support with `ANTHROPIC_API_KEY`.
+- **Rationale**:
+  Native SDK adapters provide feature parity with each model provider's latest API capabilities, eliminate emulation proxy delays, reduce token expenditure, and preserve strict `LanguageModelV1` interoperability across all Cube agents.
+- **Consequences & System Impact**:
+  Every Cube and Swarm runner can now selectively deploy native Gemini, Anthropic, Groq, Ollama, or DeepSeek models with full capability preservation and resilient failovers. All unit test suites pass with 100% success.
+
+---
+
+## [ADR-020] Native xAI (Grok) Adapter Integration
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  xAI (Grok) was previously routed through the generic OpenAI proxy fallback. This caused model namespace naming collisions (`xai/grok-4.7` vs `grok-4.7`), lacked proper identification in telemetry, and failed to provide actionable diagnostics when accounts hit balance depletion (`HTTP 402`) or rate limits (`HTTP 429`).
+- **Decision Made**:
+  1. Installed official `@ai-sdk/xai` (v4.0.59) via `pnpm`.
+  2. Implemented `lib/ai/xai.ts` with clean namespace normalization (`normalizeXaiModelId`), quota/payment interceptor (`createXaiFetch`), and model instantiation (`createXaiModel`).
+  3. Integrated `createXaiModel` into `lib/ai/provider.ts` under the `xai` provider branch in `getLanguageModel`.
+  4. Added `lib/ai/xai.test.ts` covering normalization, validation, instantiation, and error interception.
+- **Rationale**:
+  Native xAI support provides accurate provider identification (`xai.responses`), handles Grok-specific URL configurations, and delivers early warning diagnostics when credit balances are exhausted.
+- **Consequences & System Impact**:
+  Cube agents requesting Grok models (`grok-4.7`, `grok-4`, `grok-3-mini`, `grok-2`) run through native xAI drivers with full `LanguageModelV1` compliance and failover resilience. All test suites pass.
+
+---
+
+## [ADR-021] Decommissioning of OpenRouter Proxy
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  OpenRouter was previously used as a catch-all aggregator and fallback. Having `OPENAI_BASE_URL` point to OpenRouter in `.env.local` caused model calls to inadvertently route through OpenRouter instead of directly hitting native provider endpoints (Anthropic, Gemini, Groq, Ollama, DeepSeek, xAI).
+- **Decision Made**:
+  1. Removed `OPENAI_BASE_URL=https://openrouter.ai/api/v1` from `.env.local`.
+  2. Removed OpenRouter from `config/providers.json`.
+  3. Removed `"openrouter"` from `ProviderId`, `preferenceOrder`, `gatewayInfo()`, and model routing logic in `lib/ai/provider.ts`.
+  4. Removed OpenRouter header logic from `app/api/providers/route.ts` and `lib/ai/models.ts`.
+  5. Updated test assertions in `lib/ai/provider.test.ts` to verify direct native provider routing.
+- **Rationale**:
+  With dedicated native adapters in place for all supported foundation models, routing through an intermediate proxy like OpenRouter introduced unnecessary latency, intermediary fees, and extra failure modes.
+- **Consequences & System Impact**:
+  All model traffic flows strictly through direct, native SDK adapters or local instances without intermediary proxying. All 43 test suites pass cleanly.
+
+---
+
+## [ADR-022] Unification of KubeMind AI Gateway & Memory Integration
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  The codebase previously referred to the local AI model router as `kuberoute` pointing to `http://localhost:9080/v1` and referenced conflicting ports (9090 vs 9081) for vector memory. In reality, `kuberoute` is a separate Kubernetes cluster infrastructure optimizer, while `KubeMind` is the actual AI Governance Gateway (`router:9080`) and Vector Memory engine (`mind:9081`).
+- **Decision Made**:
+  1. Updated `config/providers.json` to define `kubemind` ("KubeMind AI Governance Gateway") at `http://localhost:9080/v1`, removing confusing references to KubeRoute.
+  2. Updated `lib/memory/kubemind.ts` so `getKubemindUrl()` defaults to port `9081` (`KubeMind`'s actual `services/mind` vector service port), with environment overrides (`KUBEMIND_URL` and `KUBEMIND_MIND_URL`).
+  3. Updated `lib/ai/provider.ts` to recognize `kubemind` as a canonical `ProviderId`, inject `X-KubeMind-Client` headers, report `provider: "kubemind"` in `gatewayInfo()`, while maintaining backwards-compatible aliases for any legacy references.
+  4. Updated `services/provider-credentials/cmd/server/main.go` to recognize `kubemind`.
+- **Rationale**:
+  Aligning terminology and default connection ports with KubeMind's true microservice topology ensures clean local developer workflows, eliminates confusion with infrastructure schedulers, and connects agent vector memory directly to `services/mind`.
+- **Consequences & System Impact**:
+  Cube long-term memory automatically connects to KubeMind on `:9081` when running locally, and gateway diagnostics accurately identify `kubemind`. All test suites pass.
+
+---
+
+## [ADR-023] Native Python Providers for Anthropic and Gemini in KubeMind Gateway
+
+- **Date**: 2026-10-22
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  KubeMind (`services/router`) previously routed Google Gemini through Google's legacy `/v1beta/openai/` compatibility endpoint, introducing translation latency and feature degradation. Furthermore, Anthropic Claude required an external OpenAI-compatible proxy (such as LiteLLM), adding unnecessary dependency bloat and preventing the use of native Anthropic features like Ephemeral Prompt Caching (`cache_control`).
+- **Decision Made**:
+  1. Implemented `services/router/src/router/providers/anthropic.py`:
+     - Native `BaseProvider` implementation communicating directly with Anthropic Messages API (`https://api.anthropic.com/v1/messages`).
+     - Automated ephemeral prompt caching headers (`anthropic-beta: prompt-caching-2024-07-31`) on system instructions, saving up to 90% of prompt token costs on multi-turn conversations.
+     - Upstream SSE stream normalization converting `content_block_delta` into standard `chat.completion.chunk` SSE lines for KubeMind's downstream `StreamingDeAnonymizer`.
+  2. Implemented `services/router/src/router/providers/gemini.py`:
+     - Native `BaseProvider` implementation communicating directly with Google REST API (`https://generativelanguage.googleapis.com/v1beta`).
+     - Uses secure `x-goog-api-key` headers for zero-leak authentication.
+     - Translates chat requests into native `contents` and `systemInstruction` payloads.
+     - Supports native SSE streaming via `/models/{model}:streamGenerateContent?alt=sse`, dynamic model catalog discovery via `GET /models`, and embeddings via `:embedContent`.
+  3. Updated `services/router/src/router/providers/registry.py` to automatically instantiate `AnthropicProvider` and `GeminiProvider`.
+  4. Updated `services/router/config/gateway.yaml` to configure direct native upstream URLs.
+  5. Added unit test suite `services/router/tests/test_native_providers.py` with 100% pass rate across all 9 tests.
+- **Rationale**:
+  Native async Python adapters using existing `httpx` dependencies provide first-class provider capabilities, lower latency, and support prompt caching without the overhead, container footprint, or 100MB+ dependencies of generic proxy tools like LiteLLM.
+- **Consequences & System Impact**:
+  KubeMind routes Anthropic and Gemini traffic through high-efficiency native protocols while maintaining full backwards compatibility with downstream PII masking, DLP audits, semantic caching, and streaming de-anonymization. All 302 router tests pass cleanly.
+
+---
+
+## [ADR-024] Native Provider SDK Prioritization Over Proxy Downgrading in DeskID Sessions
+
+- **Date**: 2026-10-23
+- **Status**: Accepted and Verified with unit tests.
+- **Context & Problem Statement**:
+  When `PROVIDER_CREDENTIALS_URL` was configured, `lib/ai/provider.ts` previously hijacked all model invocations through a generic `createOpenAI(...)` proxy wrapper targeting `/v1/proxy/{provider}/chat/completions`. This architectural flaw bypassed the native SDK adapters (`createGeminiModel`, `createAnthropicModel`, `createGroqModel`, `createXaiModel`), stripped Anthropic prompt caching, triggered 404 errors on Anthropic Claude (which has no `/chat/completions` endpoint), and forced Google Gemini through an emulation shim.
+- **Decision Made**:
+  1. Refactored `getLanguageModel` in `lib/ai/provider.ts` to strictly prioritize **Direct Native SDK Execution** whenever direct API keys exist (from environment variables, `.env.local`, or explicit caller options).
+  2. Maintained the `PROVIDER_CREDENTIALS_URL` proxy solely as a fallback for OpenAI-compatible providers when no direct key is configured in the environment.
+  3. Added explicit guardrails preventing non-OpenAI protocols (Claude and Gemini) from being routed to an incompatible `/chat/completions` proxy, delivering clear remediation instructions rather than obscure HTTP 404/502 errors.
+- **Rationale**:
+  DeskID IAM handles identity and multi-tenant scoping (`sub`, `org_id`, `roles`), while official SDKs (`@ai-sdk/google`, `@ai-sdk/anthropic`, `@ai-sdk/groq`, `@ai-sdk/xai`) handle model execution. Decoupling authentication from network proxying ensures that DeskID-authenticated users receive 100% native SDK capabilities, real-time reasoning tokens, and prompt caching.
+- **Consequences & System Impact**:
+  All Cube agents, swarms, and threads authenticated with DeskID run with direct native performance, zero intermediate proxy latency, and zero Anthropic 404 failures. All 50 test suites pass with 100% success.

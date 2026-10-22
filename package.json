@@ -18,8 +18,12 @@
     "kubes": "./kubes"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.85",
+    "@ai-sdk/google": "^4.0.102",
+    "@ai-sdk/groq": "^4.0.67",
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/react": "^4.0.130",
+    "@ai-sdk/xai": "^4.0.59",
     "ai": "^7.0.127",
     "better-sqlite3": "^13.0.3",
     "highlight.js": "^11.12.0",

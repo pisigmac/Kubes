@@ -90,9 +90,10 @@ export async function POST(request: Request) {
           if (!saved.ok) return Response.json({ ok: false, saved: false, error: "Could not securely save this provider credential." }, { status: saved.status });
         }
         const tested = await callCredentialService(request, `${providerPath}/test`, { method: "POST", body: "{}" });
-        const result = await tested.json().catch(() => ({ ok: false, category: "provider_unavailable" })) as { ok?: boolean; category?: string; latency_ms?: number };
+        const result = await tested.json().catch(() => ({ ok: false, category: "provider_unavailable" })) as { ok?: boolean; category?: string; latency_ms?: number; models?: string[] };
         const messages: Record<string, string> = {
           verified: "Provider connection verified.",
+          key_accepted: `Key accepted; found ${result.models?.length ?? 0} compatible models. Chat generation was not tested.`,
           invalid_credential: "The provider rejected this key. Check it and try again.",
           quota_or_billing: "The provider reports a quota or billing limit.",
           unsupported_model: "The provider does not support the configured test model.",
@@ -141,10 +142,6 @@ export async function POST(request: Request) {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${apiKey || "ollama"}`,
       };
-      if (provider.id === "openrouter") {
-        headers["HTTP-Referer"] = "http://localhost:3000";
-        headers["X-Title"] = "Kubes";
-      }
 
       const targetUrl = baseURL.endsWith("/") ? `${baseURL}models` : `${baseURL}/models`;
       const response = await fetch(targetUrl, {

@@ -17,8 +17,8 @@ flowchart TD
     end
 
     subgraph CorePlatform["Kubes Core Services"]
-        WebServer["Kubes Web App & API Routes (Port 3000)"]
-        AgentCore["Python Agent Core / LLM Routing (Port 8000)"]
+        WebServer["Kubes Web App & API Routes (preferred host port 23000; container port 3000)"]
+        AgentCore["Python Agent Core / LLM Routing (preferred host port 28000; container port 8000)"]
         Scheduler["Autonomous Cron Scheduler Daemon"]
         CredentialService["Provider Credentials Go Service (private network)"]
     end
@@ -61,8 +61,8 @@ Provider credentials are personal to the authenticated `(tenant, principal)` pai
 
 | Service | Default Port | Protocol | Scope | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `kubes-web` | 3000 | HTTP | Localhost / Ingress | Web application & Next.js App Router API |
-| `kubes-agent-core` | 8000 | HTTP | Internal | Python uvicorn agent runtime & model provider routing |
+| `kubes-web` | 23000 preferred host port; container port 3000 | HTTP | Localhost / Ingress | Web application & Next.js App Router API; host port is selected by `port-alloc` |
+| `kubes-agent-core` | 28000 preferred host port; container port 8000 | HTTP | Internal | Python uvicorn agent runtime & model provider routing; host port is selected by `port-alloc` |
 | `deskid` | 8090 | HTTP | Internal / Auth | Cryptographic IAM, JWKS, and OAuth2 identity provider |
 | `keymint` | 8080 | HTTP | Internal / Security | Secret management & encryption companion |
 | `kubemind` | 9090 | HTTP | Internal / Vector | Semantic memory & vector indexing engine |

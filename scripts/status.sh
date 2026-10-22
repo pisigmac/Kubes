@@ -95,8 +95,8 @@ get_service_port() {
   echo "${fallback}"
 }
 
-WEB_PORT=$(get_service_port "kubes-web" "3000")
-AGENT_PORT=$(get_service_port "kubes-agent-core" "8000")
+WEB_PORT=$(get_service_port "kubes-web" "23000")
+AGENT_PORT=$(get_service_port "kubes-agent-core" "28000")
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🔍 Kubes Stack & Companion Services Dashboard"

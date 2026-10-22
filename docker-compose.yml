@@ -8,7 +8,7 @@ services:
     container_name: kubes-web
     restart: unless-stopped
     ports:
-      - "${KUBES_WEB_PORT:-3000}:3000"
+      - "${KUBES_WEB_PORT:-23000}:3000"
     env_file:
       - path: .env.local
         required: false
@@ -21,6 +21,7 @@ services:
       - DESKID_JWKS_URL=${IDENTITY_JWKS_URL:?Set IDENTITY_JWKS_URL in .env.provider-credentials}
       - DESKID_ISSUER=${IDENTITY_ISSUER:?Set IDENTITY_ISSUER in .env.provider-credentials}
       - DESKID_AUDIENCE=${IDENTITY_AUDIENCE:?Set IDENTITY_AUDIENCE in .env.provider-credentials}
+      - DESKID_AUTH_URL=${DESKID_AUTH_URL:-http://host.docker.internal:8090}
       - CUBES_CHROME=/usr/bin/chromium
       - CUBES_COMPUTER_ROOT=/app/data/computer
       - PROVIDER_CREDENTIALS_URL=http://provider-credentials:8081
@@ -30,6 +31,8 @@ services:
     depends_on:
       - kubes-agent-core
       - provider-credentials
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - kubes-network
       - provider-credentials-network
@@ -73,6 +76,8 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - provider-credentials-network
 
@@ -83,7 +88,7 @@ services:
     container_name: kubes-agent-core
     restart: unless-stopped
     ports:
-      - "${KUBES_AGENT_CORE_PORT:-8000}:8000"
+      - "${KUBES_AGENT_CORE_PORT:-28000}:8000"
     environment:
       - PYTHONUNBUFFERED=1
       - KUBEMIND_ENABLED=${KUBEMIND_ENABLED:-false}

@@ -224,6 +224,40 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request, id auth.Identity, 
 	}
 	defer zero(secret)
 	p := s.Providers[provider]
+	if provider == "gemini" {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		start := time.Now()
+		models, status, err := s.discoverModels(ctx, p, secret)
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			category := "provider_unavailable"
+			if errors.Is(err, context.DeadlineExceeded) {
+				category = "timeout"
+			}
+			s.logProviderTestFailure(provider, category, 0, latency)
+			writeJSON(w, 200, map[string]any{"ok": false, "category": category, "latency_ms": latency})
+			return
+		}
+		if status >= 200 && status < 300 {
+			if err := s.Repo.Verify(r.Context(), id.TenantID, id.PrincipalID, provider); err != nil {
+				writeError(w, 500, "storage_error")
+				return
+			}
+			writeJSON(w, 200, map[string]any{"ok": true, "category": "key_accepted", "latency_ms": latency, "models": models})
+			return
+		}
+		category := providerTestCategory(status)
+		if category == "invalid_credential" {
+			if err := s.Repo.Unverify(r.Context(), id.TenantID, id.PrincipalID, provider); err != nil {
+				writeError(w, 500, "storage_error")
+				return
+			}
+		}
+		s.logProviderTestFailure(provider, category, status, latency)
+		writeJSON(w, 200, map[string]any{"ok": false, "category": category, "latency_ms": latency})
+		return
+	}
 	payload, _ := json.Marshal(map[string]any{"model": p.TestModel, "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 8, "stream": false})
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
@@ -235,6 +269,7 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request, id auth.Identity, 
 		if errors.Is(err, context.DeadlineExceeded) {
 			category = "timeout"
 		}
+		s.logProviderTestFailure(provider, category, 0, latency)
 		writeJSON(w, 200, map[string]any{"ok": false, "category": category, "latency_ms": latency})
 		return
 	}
@@ -260,7 +295,90 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request, id auth.Identity, 
 	} else if resp.StatusCode == 400 || resp.StatusCode == 404 {
 		category = "unsupported_model"
 	}
+	s.logProviderTestFailure(provider, category, resp.StatusCode, latency)
 	writeJSON(w, 200, map[string]any{"ok": false, "category": category, "latency_ms": latency})
+}
+
+func (s *Server) discoverModels(ctx context.Context, p Provider, key []byte) ([]string, int, error) {
+	base, err := url.Parse(strings.TrimRight(p.BaseURL, "/"))
+	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, 0, errors.New("provider unavailable")
+	}
+	if base.Scheme != "https" || !safeHost(base.Hostname()) {
+		return nil, 0, errors.New("provider unavailable")
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+string(key))
+	resp, err := s.HTTP.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		return nil, resp.StatusCode, nil
+	}
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	models := make([]string, 0, len(result.Data))
+	seen := make(map[string]struct{}, len(result.Data))
+	for _, item := range result.Data {
+		model := strings.TrimSpace(item.ID)
+		if len(model) == 0 || len(model) > 200 || !safeModelID(model) {
+			continue
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	return models, resp.StatusCode, nil
+}
+
+func safeModelID(model string) bool {
+	for _, char := range model {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("._:/-", char) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func providerTestCategory(status int) string {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "invalid_credential"
+	case http.StatusPaymentRequired, http.StatusTooManyRequests:
+		return "quota_or_billing"
+	case http.StatusBadRequest, http.StatusNotFound:
+		return "unsupported_model"
+	default:
+		return "provider_unavailable"
+	}
+}
+
+func (s *Server) logProviderTestFailure(provider, category string, statusCode int, latency int64) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Warn("provider test failed",
+		slog.String("provider", provider),
+		slog.String("category", category),
+		slog.Int("http_status", statusCode),
+		slog.Int64("latency_ms", latency),
+	)
 }
 
 func (s *Server) allowTest(id auth.Identity, provider string) bool {
@@ -282,6 +400,7 @@ func (s *Server) allowTest(id auth.Identity, provider string) bool {
 	return true
 }
 func (s *Server) proxy(w http.ResponseWriter, r *http.Request, id auth.Identity, provider string) {
+	started := time.Now()
 	p, ok := s.Providers[provider]
 	if !ok {
 		writeError(w, 404, "unknown_provider")
@@ -306,12 +425,14 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, id auth.Identity,
 	defer zero(body)
 	resp, err := s.upstream(r.Context(), p, secret, body)
 	if err != nil {
+		s.logProxyFailure(provider, "upstream_request", proxyErrorCategory(r.Context(), err), 0, time.Since(started))
 		writeError(w, 502, "provider_unavailable")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		s.logProxyFailure(provider, "upstream_response", providerTestCategory(resp.StatusCode), resp.StatusCode, time.Since(started))
 		code := "provider_unavailable"
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
 			code = "invalid_credential"
@@ -337,9 +458,47 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, id auth.Identity,
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(w, io.LimitReader(resp.Body, 16<<20)); err != nil {
-		s.Logger.Warn("provider stream ended", "provider", provider)
+		s.logProxyFailure(provider, "response_stream", streamErrorCategory(r.Context(), err), resp.StatusCode, time.Since(started))
 	}
 }
+
+func proxyErrorCategory(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+		return "request_cancelled"
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return "request_timeout"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "upstream_timeout"
+	}
+	return "upstream_connection_error"
+}
+
+func streamErrorCategory(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+		return "stream_cancelled"
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return "stream_timeout"
+	}
+	return "stream_read_error"
+}
+
+func (s *Server) logProxyFailure(provider, phase, category string, status int, elapsed time.Duration) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Warn("provider proxy failed",
+		slog.String("provider", provider),
+		slog.String("phase", phase),
+		slog.String("category", category),
+		slog.Int("upstream_http_status", status),
+		slog.Int64("latency_ms", elapsed.Milliseconds()),
+	)
+}
+
 func (s *Server) unprotect(id auth.Identity, provider string, c store.Credential) ([]byte, error) {
 	if c.KeyVersion != 1 {
 		return nil, errors.New("unsupported credential key version")

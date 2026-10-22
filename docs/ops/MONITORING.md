@@ -4,8 +4,8 @@
 
 | Service | Check URL | Target SLA | Expected Response |
 | :--- | :--- | :--- | :--- |
-| `kubes-web` | `http://127.0.0.1:3000/api/models` | 99.9% | HTTP 200 / 401 |
-| `kubes-agent-core` | `http://127.0.0.1:8000/health` | 99.9% | HTTP 200 `{"status": "ok"}` |
+| `kubes-web` | `http://127.0.0.1:23000/api/models` (preferred; allocator may select another port) | 99.9% | HTTP 200 / 401 |
+| `kubes-agent-core` | `http://127.0.0.1:28000/health` (preferred; allocator may select another port) | 99.9% | HTTP 200 `{"status": "ok"}` |
 | `deskid` | `http://127.0.0.1:8090/health` | 99.99% | HTTP 200 `{"status": "ok"}` |
 | `keymint` | `http://127.0.0.1:8080/health` | 99.99% | HTTP 200 `{"status": "ok"}` |
 | `kubemind` | `http://127.0.0.1:9090/health` | 99.9% | HTTP 200 `{"status": "ok"}` |

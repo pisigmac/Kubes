@@ -373,6 +373,7 @@ export function CubeChat({
               <button
                 type="button"
                 onClick={() => {
+                  setStreamSettled(true);
                   stop();
                   if (swarmRunning) stopSwarm();
                 }}
@@ -396,13 +397,19 @@ export function CubeChat({
             <p className="mt-2 px-3 text-xs text-amber-300/80">Verify an AI provider key before sending a message.</p>
           ) : null}
           <div className="mt-2 flex items-center justify-between px-3 text-xs text-white/35">
-            <p>
-              {swarmRunning
-                ? "Swarm agents collaborating in parallel…"
-                : busy
-                  ? `${cube.name} is writing…`
-                  : `${cube.name} · ${cube.model}`}
-            </p>
+            {busy ? (
+              <p role="status" aria-live="polite" className="inline-flex items-center gap-2 text-[#e7ff3a]/90">
+                <span
+                  aria-hidden="true"
+                  className="size-3 animate-spin rounded-full border-2 border-[#e7ff3a]/25 border-t-[#e7ff3a]"
+                />
+                <span>
+                  Working…{swarmRunning ? " Swarm agents collaborating in parallel." : ""}
+                </span>
+              </p>
+            ) : (
+              <p>{`${cube.name} · ${cube.model}`}</p>
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"

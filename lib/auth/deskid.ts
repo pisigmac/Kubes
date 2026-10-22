@@ -21,8 +21,8 @@ export type DeskIDTokenClaims = {
   email?: string;
   org_id?: string;
   roles?: {
-    kubes?: string[];
-    [key: string]: string[] | undefined;
+    kubes?: string | string[];
+    [key: string]: string | string[] | undefined;
   };
   exp?: number;
   iat?: number;
@@ -41,6 +41,21 @@ export interface DeskIDValidationOptions {
 
 let remoteJWKS: JWTVerifyGetKey | null = null;
 let cachedJwksUrl: string | null = null;
+
+function normalizeRolesClaim(value: unknown): DeskIDTokenClaims["roles"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { kubes: [] };
+  }
+
+  const kubesRoles = (value as Record<string, unknown>).kubes;
+  if (typeof kubesRoles === "string") {
+    return { kubes: [kubesRoles] };
+  }
+  if (Array.isArray(kubesRoles)) {
+    return { kubes: kubesRoles.filter((role): role is string => typeof role === "string") };
+  }
+  return { kubes: [] };
+}
 
 export function getAuthMode(): "none" | "deskid" {
   const mode = process.env.AUTH_MODE?.trim().toLowerCase();
@@ -123,7 +138,7 @@ export async function validateDeskIDToken(
       sub,
       email: typeof payload.email === "string" ? payload.email : undefined,
       org_id: orgIdClaim || "default",
-      roles: (payload.roles as DeskIDTokenClaims["roles"]) || { kubes: [] },
+      roles: normalizeRolesClaim(payload.roles),
       exp: payload.exp,
       iat: payload.iat,
       nbf: payload.nbf,

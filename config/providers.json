@@ -132,6 +132,26 @@
       "model_prefixes": ["deepseek-"]
     },
     {
+      "id": "anthropic",
+      "name": "Anthropic Claude Direct",
+      "default_base_url": "https://api.anthropic.com/v1",
+      "env_key_names": ["ANTHROPIC_API_KEY"],
+      "env_url_names": ["ANTHROPIC_BASE_URL"],
+      "api_key_url": "https://console.anthropic.com/settings/keys",
+      "tier_type": "credits",
+      "credit_card_required": true,
+      "default_model": "claude-3-7-sonnet-20250219",
+      "models": [
+        "claude-3-7-sonnet-20250219",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-sonnet-5.5",
+        "claude-opus-5.5",
+        "claude-haiku-5.5"
+      ],
+      "model_prefixes": ["claude-", "anthropic/"]
+    },
+    {
       "id": "mistral",
       "name": "Mistral AI",
       "default_base_url": "https://api.mistral.ai/v1",
@@ -149,33 +169,6 @@
         "ministral-8b-latest"
       ],
       "model_prefixes": ["mistral-", "codestral-", "pixtral-", "ministral-"]
-    },
-    {
-      "id": "openrouter",
-      "name": "OpenRouter (400+ Frontier Models)",
-      "default_base_url": "https://openrouter.ai/api/v1",
-      "env_key_names": ["OPENROUTER_API_KEY"],
-      "env_url_names": ["OPENROUTER_BASE_URL"],
-      "api_key_url": "https://openrouter.ai/keys",
-      "tier_type": "permanent",
-      "credit_card_required": false,
-      "default_model": "anthropic/claude-sonnet-5.5",
-      "models": [
-        "anthropic/claude-sonnet-5.5",
-        "anthropic/claude-opus-5.5",
-        "anthropic/claude-haiku-5.5",
-        "anthropic/claude-3.7-sonnet",
-        "anthropic/claude-3.7-sonnet:thinking",
-        "openai/gpt-6-astra",
-        "openai/gpt-6.1-sol",
-        "openai/o3-mini",
-        "deepseek/deepseek-v4.1-flash",
-        "deepseek/deepseek-r1",
-        "google/gemini-4-argon",
-        "google/gemini-3.8-flash",
-        "meta-llama/llama-4-70b-instruct"
-      ],
-      "model_prefixes": ["/"]
     },
     {
       "id": "openai",
@@ -311,12 +304,12 @@
       "model_prefixes": []
     },
     {
-      "id": "kuberoute",
-      "name": "KubeRoute Model Router",
+      "id": "kubemind",
+      "name": "KubeMind AI Governance Gateway",
       "default_base_url": "http://localhost:9080/v1",
-      "env_key_names": ["KUBEROUTE_API_KEY", "KUBEMIND_API_KEY"],
-      "env_url_names": ["KUBEROUTE_GATEWAY_URL", "KUBEMIND_ROUTER_URL"],
-      "api_key_url": "http://localhost:9080",
+      "env_key_names": ["KUBEMIND_API_KEY", "KUBEROUTE_API_KEY"],
+      "env_url_names": ["KUBEMIND_GATEWAY_URL", "KUBEMIND_ROUTER_URL", "KUBEROUTE_GATEWAY_URL"],
+      "api_key_url": "http://localhost:9000",
       "tier_type": "permanent",
       "credit_card_required": false,
       "default_model": "gemini-3.8-flash",
@@ -324,11 +317,11 @@
         "gemini-4-argon",
         "gemini-3.8-flash",
         "llama-4-70b-versatile",
-        "anthropic/claude-sonnet-5.5",
+        "claude-3-7-sonnet-20250219",
         "grok-4.7",
-        "gpt-6.1-sol"
+        "deepseek-reasoner"
       ],
-      "model_prefixes": []
+      "model_prefixes": ["kubemind/"]
     }
   ],
   "specialist_recommendations": {

@@ -4,7 +4,7 @@ info:
   description: REST API specification for Kubes multi-tenant autonomous specialist AI cubes, chat threads, scheduling, and jail execution.
   version: 1.0.0
 servers:
-  - url: http://localhost:3000
+  - url: http://localhost:23000
     description: Local development server
 paths:
   /api/cubes:

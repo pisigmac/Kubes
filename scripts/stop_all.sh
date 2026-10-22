@@ -10,7 +10,11 @@ PID_DIR="${ROOT_DIR}/.pids"
 if command -v docker >/dev/null 2>&1; then
   if docker ps --filter "name=kubes" --format "{{.ID}}" 2>/dev/null | grep -q .; then
     echo "🛑 Stopping Kubes Docker Compose stack..."
-    docker compose -f "${ROOT_DIR}/docker-compose.yml" down 2>/dev/null || docker compose down 2>/dev/null || true
+    COMPOSE_ENV_ARGS=()
+    if [[ -f "${ROOT_DIR}/.env.provider-credentials" ]]; then
+      COMPOSE_ENV_ARGS+=(--env-file "${ROOT_DIR}/.env.provider-credentials")
+    fi
+    docker compose -f "${ROOT_DIR}/docker-compose.yml" "${COMPOSE_ENV_ARGS[@]}" down 2>/dev/null || true
     echo "✅ Docker stack stopped."
   fi
 fi

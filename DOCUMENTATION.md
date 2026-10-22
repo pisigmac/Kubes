@@ -21,7 +21,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open the URL Next prints. If port 3000 is already taken, start with `npm run dev -- --port 3010`.
+Open the URL printed by `make start`. Kubes prefers host port 23000 and uses `port-alloc` to select another free port when needed.
 
 The key and the base URL must belong to the same provider. The model list can look healthy when chat will fail: some hosts, including OpenRouter, publish `GET /models` with no key. A chat call then returns 401. Use an OpenRouter key with an OpenRouter base URL, or an OpenAI key with `https://api.openai.com/v1`. Do not mix them.
 
@@ -282,7 +282,7 @@ Kubes is designed to interface with complementary specialized modules in the eco
 
 The review's release recommendation is spot-on:
 
-1. **Positioning:** Standalone mode remains a **Single-User Local Desktop Beta** on `localhost:3000`. DeskID mode adds server-side authentication and organization scoping, but production deployment still requires environment-specific issuer/JWKS, sandbox, and operational validation.
+1. **Positioning:** Standalone mode remains a **Single-User Local Desktop Beta** on the URL printed by startup (preferred host port `23000`). DeskID mode adds server-side authentication and organization scoping, but production deployment still requires environment-specific issuer/JWKS, sandbox, and operational validation.
 2. **Sandbox Enforcement:** If `bwrap` / container isolation is unavailable on the host OS, **disable computer tool execution by default** rather than silently running raw `bash -c`.
 3. **Provider Activation:** Separate key verification from activation. Provide an explicit, documented activation path using an encrypted local store or a deliberate `.env.local` configuration step; do not imply that verification changes the active chat provider.
 4. **Browser Isolation:** Refactor `browser.ts` to use ephemeral incognito browser contexts (`browser.createBrowserContext()`) per task.

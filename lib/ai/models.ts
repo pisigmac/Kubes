@@ -54,10 +54,6 @@ async function fetchModelsFromActiveProviders(): Promise<string[]> {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${key || "ollama"}`,
       };
-      if (provider.id === "openrouter") {
-        headers["HTTP-Referer"] = "http://localhost:3000";
-        headers["X-Title"] = "Kubes";
-      }
 
       const response = await fetch(new URL("models", ensureSlash(baseURL)), {
         headers,

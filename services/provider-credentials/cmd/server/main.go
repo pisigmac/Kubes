@@ -82,7 +82,7 @@ func loadProviders() (map[string]api.Provider, error) {
 		providers := make(map[string]api.Provider, len(source.Providers))
 		for _, item := range source.Providers {
 			parsed, err := url.Parse(item.BaseURL)
-			if err != nil || item.ID == "cohere" || item.ID == "ollama" || item.ID == "keymint" || item.ID == "kuberoute" || item.ID == "" || item.Name == "" || item.Model == "" || parsed.Host == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			if err != nil || item.ID == "cohere" || item.ID == "ollama" || item.ID == "keymint" || item.ID == "kubemind" || item.ID == "kuberoute" || item.ID == "" || item.Name == "" || item.Model == "" || parsed.Host == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 				continue
 			}
 			providers[item.ID] = api.Provider{Name: item.Name, BaseURL: item.BaseURL, TestModel: item.Model}

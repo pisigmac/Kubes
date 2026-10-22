@@ -15,26 +15,50 @@ PORT_ALLOC_BIN="$(command -v port-alloc 2>/dev/null || ( [[ -x "${HOME}/.local/b
 allocate_service_port() {
   local service="$1"
   local preferred="$2"
-  if [[ -n "${PORT_ALLOC_BIN}" ]]; then
-    "${PORT_ALLOC_BIN}" allocate --service "${service}" --preferred "${preferred}"
-  else
-    echo "${preferred}"
+  if [[ -z "${PORT_ALLOC_BIN}" ]]; then
+    echo "❌ port-alloc is required to start Kubes without a fixed-port fallback." >&2
+    return 1
   fi
+  local last_port=$((preferred + 100))
+  local allocated
+  allocated="$("${PORT_ALLOC_BIN}" allocate --service "${service}" --preferred "${preferred}" --range "${preferred}-${last_port}")"
+  if ! [[ "${allocated}" =~ ^[0-9]+$ ]] || (( allocated < preferred || allocated > last_port )); then
+    echo "❌ port-alloc has an existing lease for ${service} outside ${preferred}-${last_port}; stop the old Kubes instance and release its lease." >&2
+    return 1
+  fi
+  printf '%s\n' "${allocated}"
 }
 
 if [[ "${1:-}" == "--docker" ]]; then
   echo "🚀 Starting Kubes stack via Docker Compose..."
-  DOCKER_WEB_PORT=$(allocate_service_port "kubes-web" 3000)
-  DOCKER_AGENT_PORT=$(allocate_service_port "kubes-agent-core" 8000)
-  KUBES_WEB_PORT="${DOCKER_WEB_PORT}" KUBES_AGENT_CORE_PORT="${DOCKER_AGENT_PORT}" docker compose up -d --build
+  DOCKER_WEB_PORT=$(allocate_service_port "kubes-web" 23000)
+  DOCKER_AGENT_PORT=$(allocate_service_port "kubes-agent-core" 28000)
+  COMPOSE_ENV_ARGS=()
+  if [[ -f "${ROOT_DIR}/.env.provider-credentials" ]]; then
+    COMPOSE_ENV_ARGS+=(--env-file "${ROOT_DIR}/.env.provider-credentials")
+  fi
+  KUBES_WEB_PORT="${DOCKER_WEB_PORT}" KUBES_AGENT_CORE_PORT="${DOCKER_AGENT_PORT}" \
+    docker compose "${COMPOSE_ENV_ARGS[@]}" up -d --build
+  if [[ -n "${PORT_ALLOC_BIN}" ]]; then
+    WEB_CONTAINER_PID="$(docker inspect --format '{{.State.Pid}}' kubes-web 2>/dev/null || true)"
+    AGENT_CONTAINER_PID="$(docker inspect --format '{{.State.Pid}}' kubes-agent-core 2>/dev/null || true)"
+    if [[ "${WEB_CONTAINER_PID}" =~ ^[1-9][0-9]*$ ]]; then
+      "${PORT_ALLOC_BIN}" register --service kubes-web --port "${DOCKER_WEB_PORT}" \
+        --pid "${WEB_CONTAINER_PID}" --url "http://127.0.0.1:${DOCKER_WEB_PORT}" >/dev/null
+    fi
+    if [[ "${AGENT_CONTAINER_PID}" =~ ^[1-9][0-9]*$ ]]; then
+      "${PORT_ALLOC_BIN}" register --service kubes-agent-core --port "${DOCKER_AGENT_PORT}" \
+        --pid "${AGENT_CONTAINER_PID}" --url "http://127.0.0.1:${DOCKER_AGENT_PORT}" >/dev/null
+    fi
+  fi
   echo "✅ Kubes stack started."
   echo "🌐 Web UI: http://localhost:${DOCKER_WEB_PORT}"
   echo "🤖 Agent Core: http://localhost:${DOCKER_AGENT_PORT}"
   exit 0
 fi
 
-WEB_PORT=$(allocate_service_port "kubes-web" 3000)
-AGENT_CORE_PORT=$(allocate_service_port "kubes-agent-core" 8000)
+WEB_PORT=$(allocate_service_port "kubes-web" 23000)
+AGENT_CORE_PORT=$(allocate_service_port "kubes-agent-core" 28000)
 
 echo "🚀 Starting Kubes local multi-process stack..."
 
@@ -48,7 +72,8 @@ else
   echo $! > "${PID_DIR}/agent-core.pid"
   sleep 1.5
   if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/agent-core.pid" ]]; then
-    "${PORT_ALLOC_BIN}" allocate --service "kubes-agent-core" --preferred "${AGENT_CORE_PORT}" --pid "$(cat "${PID_DIR}/agent-core.pid")" >/dev/null 2>&1 || true
+    "${PORT_ALLOC_BIN}" register --service "kubes-agent-core" --port "${AGENT_CORE_PORT}" \
+      --pid "$(cat "${PID_DIR}/agent-core.pid")" >/dev/null
   fi
 fi
 
@@ -62,7 +87,8 @@ else
   echo $! > "${PID_DIR}/web.pid"
   sleep 1.5
   if [[ -n "${PORT_ALLOC_BIN}" ]] && [[ -f "${PID_DIR}/web.pid" ]]; then
-    "${PORT_ALLOC_BIN}" allocate --service "kubes-web" --preferred "${WEB_PORT}" --pid "$(cat "${PID_DIR}/web.pid")" >/dev/null 2>&1 || true
+    "${PORT_ALLOC_BIN}" register --service "kubes-web" --port "${WEB_PORT}" \
+      --pid "$(cat "${PID_DIR}/web.pid")" >/dev/null
   fi
 fi
 

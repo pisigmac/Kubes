@@ -15,6 +15,7 @@ import {
   alignModelForProvider,
   getLanguageModel,
   fallbackModelsList,
+  getFallbackProviders,
 } from "./provider.ts";
 import { listModels, coerceModel } from "./models.ts";
 
@@ -53,7 +54,7 @@ test("Provider: model routing resolves matching provider by prefix", () => {
   const groqRoute = resolveProviderForModel("llama-4-70b-versatile");
   assert.ok(groqRoute.baseURL.length > 0);
 
-  // Test OpenRouter prefix
+  // Test Anthropic prefix
   const routerRoute = resolveProviderForModel("anthropic/claude-sonnet-5.5");
   assert.ok(routerRoute.baseURL.length > 0);
 });
@@ -140,8 +141,8 @@ test("Provider Resilience: error classification and formatting", () => {
   const authMsg = formatProviderErrorMessage(new Error("401 Unauthorized"), "groq");
   assert.match(authMsg, /\[groq\] API key is invalid/);
 
-  const overloadMsg = formatProviderErrorMessage(new Error("503 Service Unavailable"), "openrouter");
-  assert.match(overloadMsg, /\[openrouter\] Provider service is temporarily overloaded/);
+  const overloadMsg = formatProviderErrorMessage(new Error("503 Service Unavailable"), "anthropic");
+  assert.match(overloadMsg, /\[anthropic\] Provider service is temporarily overloaded/);
 });
 
 test("Provider Resilience: createResilientFetch retries 429 and succeeds on subsequent attempt", async () => {
@@ -236,11 +237,9 @@ test("Provider: alignModelForProvider maps unsupported models to provider defaul
   const config = loadProvidersConfig();
   const gemini = config.providers.find((p) => p.id === "gemini");
   const groq = config.providers.find((p) => p.id === "groq");
-  const openrouter = config.providers.find((p) => p.id === "openrouter");
 
   assert.ok(gemini);
   assert.ok(groq);
-  assert.ok(openrouter);
 
   // Gemini aligns foreign x-ai/grok-4.7 to defaultModel
   assert.equal(alignModelForProvider("x-ai/grok-4.7", gemini), gemini.default_model);
@@ -254,8 +253,8 @@ test("Provider: alignModelForProvider maps unsupported models to provider defaul
   // Groq keeps llama-4
   assert.equal(alignModelForProvider("llama-4-70b-versatile", groq), "llama-4-70b-versatile");
 
-  // OpenRouter preserves slash model ID
-  assert.equal(alignModelForProvider("x-ai/grok-4.7", openrouter), "x-ai/grok-4.7");
+  // Custom provider preserves model ID
+  assert.equal(alignModelForProvider("x-ai/grok-4.7", { id: "custom" }), "x-ai/grok-4.7");
 });
 
 test("Provider: all fallback models originate strictly from config/providers.json", () => {
@@ -286,7 +285,15 @@ test("Provider: getLanguageModel creates model with proper provider and credenti
   });
   assert.ok(model);
   assert.equal(model.modelId, "llama-4-70b-versatile");
-  assert.equal(model.provider, "kubes-groq.chat");
+  assert.ok(model.provider === "groq.chat" || model.provider === "kubes-groq.chat");
+});
+
+test("Provider: getFallbackProviders filters out current provider and sorts by failover priority", () => {
+  const fallbacks = getFallbackProviders("gemini", false);
+  assert.ok(Array.isArray(fallbacks));
+  assert.equal(fallbacks.some((p) => p.id === "gemini"), false, "Current provider must be excluded");
+  assert.ok(fallbacks.length > 0);
+  assert.equal(fallbacks[0].id, "groq", "Groq should be primary fallback after Gemini");
 });
 
 

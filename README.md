@@ -142,7 +142,7 @@ OPENAI_MODEL="grok-4.7"
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open the URL printed by `make start`; Kubes prefers host port `23000` and uses `port-alloc` to select a free port.
 
 ---
 

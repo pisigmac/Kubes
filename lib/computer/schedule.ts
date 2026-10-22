@@ -202,7 +202,7 @@ export async function tick(now = new Date()): Promise<void> {
     .prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at <= ? ORDER BY next_run_at ASC")
     .all(now.toISOString()) as ScheduleRow[];
   for (const row of due) {
-    if (isCubeBusy(row.cube_id)) continue;
+    if (isCubeBusy(row.cube_id, row.org_id)) continue;
 
     const scheduledTime = new Date(row.next_run_at).getTime();
     const gapMs = now.getTime() - scheduledTime;

@@ -183,3 +183,77 @@ test("Swarm Runner: formats rate limit error with specialist details", async () 
   assert.ok(task?.error?.includes("provider 'gemini'"));
 });
 
+test("Swarm Runner: throttles batch execution to maxConcurrency limit", async () => {
+  const plan: SwarmPlan = createSwarmPlan("Concurrency limit test", [
+    { id: "t1", parentCube: "maestro", assignedCube: "job-hunt", instruction: "1", dependencies: [] },
+    { id: "t2", parentCube: "maestro", assignedCube: "money", instruction: "2", dependencies: [] },
+    { id: "t3", parentCube: "maestro", assignedCube: "work", instruction: "3", dependencies: [] },
+    { id: "t4", parentCube: "maestro", assignedCube: "learn", instruction: "4", dependencies: [] },
+  ]);
+
+  let activeCount = 0;
+  let maxObservedActive = 0;
+
+  const mockConcurrentExecutor = async () => {
+    activeCount++;
+    if (activeCount > maxObservedActive) maxObservedActive = activeCount;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    activeCount--;
+    return "done";
+  };
+
+  const executedPlan = await executeSwarmPlan({
+    plan,
+    maxConcurrency: 2,
+    executor: mockConcurrentExecutor,
+  });
+
+  assert.equal(executedPlan.status, "completed");
+  assert.ok(maxObservedActive <= 2, `Observed concurrency ${maxObservedActive} must not exceed 2`);
+});
+
+test("Swarm Runner: seamlessly falls back to alternative provider on rate limit", async () => {
+  const events: SwarmRunnerEvent[] = [];
+  const plan: SwarmPlan = createSwarmPlan("Failover test", [
+    {
+      id: "task-failover",
+      parentCube: "maestro",
+      assignedCube: "job-hunt",
+      title: "Failover Job Hunt",
+      instruction: "Find remote AI roles",
+      dependencies: [],
+    },
+  ]);
+
+  let callCount = 0;
+  const mockFailoverExecutor = async (
+    _task: unknown,
+    _prompt: string,
+    _signal: AbortSignal,
+    fallbackAttempt?: { providerId: string; model: string }
+  ) => {
+    callCount++;
+    if (!fallbackAttempt) {
+      throw new Error("429 Too Many Requests: quota exceeded");
+    }
+    return `Completed using fallback provider ${fallbackAttempt.providerId} with model ${fallbackAttempt.model}`;
+  };
+
+  const executedPlan = await executeSwarmPlan({
+    plan,
+    executor: mockFailoverExecutor,
+    providerId: "gemini",
+    fallbackProviders: ["groq"],
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(executedPlan.status, "completed");
+  assert.ok(callCount >= 2, "Must have retried with fallback");
+  const task = executedPlan.tasks.find((t) => t.id === "task-failover");
+  assert.equal(task?.status, "completed");
+  assert.ok(task?.output?.includes("Completed using fallback provider"));
+
+  const progressEvents = events.filter((e) => e.type === "task_progress");
+  assert.ok(progressEvents.some((e) => "message" in e && e.message.includes("[Failover]")));
+});
+

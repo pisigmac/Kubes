@@ -53,6 +53,8 @@ export function ProviderModal({
 }) {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [providerLoadError, setProviderLoadError] = useState<string | null>(null);
+  const [providerRetry, setProviderRetry] = useState(0);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{
     id: string;
@@ -126,9 +128,25 @@ export function ProviderModal({
     if (!isOpen) return;
     let isCurrent = true;
     fetch("/api/providers")
-      .then((res) => res.json())
-      .then((data: { providers?: ProviderItem[]; activeProvider?: string | null; credentialService?: boolean }) => {
-        if (isCurrent && data.providers) {
+      .then(async (res) => {
+        const data = await res.json().catch(() => null) as { providers?: ProviderItem[]; activeProvider?: string | null; credentialService?: boolean } | null;
+        if (!res.ok) {
+          const message = res.status === 401
+            ? "Your session could not be verified by the provider service. Sign in again or check the DeskID configuration."
+            : res.status === 403
+              ? "Your DeskID account needs the viewer, editor, or admin role for Kubes. Assign a role in DeskID, then sign out and sign in again."
+            : res.status === 503
+              ? "The provider credential service is unavailable. Check that it is running and healthy."
+              : "Kubes could not load providers. Check the provider service and try again.";
+          throw new Error(message);
+        }
+        if (!data || !Array.isArray(data.providers)) {
+          throw new Error("The provider service returned an invalid provider list. Check its registry configuration.");
+        }
+        return data as { providers: ProviderItem[]; activeProvider?: string | null; credentialService?: boolean };
+      })
+      .then((data) => {
+        if (isCurrent) {
           const browserKeys = readBrowserProviderKeys();
           setCredentialServiceAvailable(Boolean(data.credentialService));
           setProviders(data.providers);
@@ -150,14 +168,14 @@ export function ProviderModal({
       })
       .catch((err) => {
         if (isCurrent) {
-          console.error("Failed to load providers", err);
+          setProviderLoadError(err instanceof Error ? err.message : "Kubes could not load providers. Check the provider service and try again.");
           setLoading(false);
         }
       });
     return () => {
       isCurrent = false;
     };
-  }, [isOpen]);
+  }, [isOpen, providerRetry]);
 
   async function handleActivate(providerId: string) {
     try {
@@ -362,8 +380,25 @@ export function ProviderModal({
 
             {loading ? (
               <p className="text-xs text-white/40 animate-pulse">Loading providers...</p>
+            ) : providerLoadError ? (
+              <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs text-amber-100">
+                <p>{providerLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoading(true);
+                    setProviderLoadError(null);
+                    setCredentialServiceAvailable(false);
+                    setProviderRetry((attempt) => attempt + 1);
+                  }}
+                  className="shrink-0 rounded-full border border-amber-200/30 px-3 py-1.5 text-amber-100 hover:bg-amber-200/10"
+                >
+                  Retry
+                </button>
+              </div>
             ) : (
               <div className="space-y-2.5">
+                {providers.length === 0 ? <p className="text-xs text-white/50">No providers were returned. Check the credential service provider registry.</p> : null}
                 {providers.map((p) => {
                   const isTesting = testingId === p.id;
                   const result = testResult?.id === p.id ? testResult : null;
@@ -521,7 +556,7 @@ export function ProviderModal({
               Keys are sent to the authenticated service, encrypted at rest, and synced to your account. The browser never stores newly added keys.
             </p>
             <p className="text-[11px] text-amber-200/70">
-              Verify sends a short chat request to the provider; its pricing or rate limits may apply.
+              Gemini verification checks key access and loads available models without sending a chat prompt. Other providers may send a short chat request; provider rate limits may apply.
             </p>
           </div>
 

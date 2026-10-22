@@ -1,5 +1,32 @@
 # Kubes Debugging & Incident Resolution Log
 
+## [DEBUG-005] DeskID Login Route Returned 404
+
+- **Incident ID & Title**: `[DEBUG-005] DeskID Login Route Returned 404`
+- **Symptoms & Error Messages**: Unauthenticated browser navigation to `/login?redirect=%2F` returned the Next.js 404 page.
+- **Root Cause**: The auth proxy redirected to `/login`, but no App Router page existed for that path.
+- **Diagnostic Steps**: Confirmed `/login` was excluded from auth enforcement and checked the `app/` route tree; only the main page existed.
+- **Resolution & Fix**: Added the login page and server-side DeskID login, refresh, and logout handlers. Credentials are exchanged by Kubes, JWTs are validated against configured issuer, audience, and JWKS, and tokens are stored in HttpOnly cookies.
+- **Verification**: Run the project test/typecheck/lint checks and verify DeskID sign-in and session refresh in the local Compose environment.
+
+## [DEBUG-006] DeskID Login Succeeded but Home Page Returned a Server Error
+
+- **Incident ID & Title**: `[DEBUG-006] DeskID Home Page Missing Tenant Scope`
+- **Symptoms & Error Messages**: After signing in successfully, navigating to `/` displayed “A server error occurred.”
+- **Root Cause**: The server-rendered home page called tenant-scoped Cube, thread, message, and schedule stores without an authenticated scope. These stores intentionally reject unscoped access in DeskID mode.
+- **Diagnostic Steps**: Traced `app/page.tsx` data-loading calls to `resolveScope`, which throws when DeskID mode receives no scope.
+- **Resolution & Fix**: Read the request cookies on the server, validate the session with `requireAuth`, pass the resulting user and organization scope to each store read, and create that organization’s starter Cube catalog idempotently.
+- **Verification**: Run project checks and verify the home page loads after DeskID sign-in with the expected organization data.
+
+## [DEBUG-007] Provider Selector Returned 403 for a Valid DeskID Viewer
+
+- **Incident ID & Title**: `[DEBUG-007] Provider Selector Returned 403 for a Valid DeskID Viewer`
+- **Symptoms & Error Messages**: The provider setup modal opened, but the provider selector contained no choices and gave no indication of a failed request.
+- **Root Cause**: The provider modal initially hid request failures, but the confirmed HTTP 403 came from a claim-format mismatch. DeskID emitted the Kubes organization role as a string (for example, `"viewer"`), while Kubes expected `roles.kubes` to be an array. Spreading that string produced individual characters, so the viewer role check failed.
+- **Diagnostic Steps**: Inspected the signed token's organization-scoped Kubes role and traced `/api/providers` through `requireAuth` and `assertRole`. The issuer, audience, subject, and organization claims were present; role normalization was the failing step.
+- **Resolution & Fix**: The modal now displays a safe status-specific error and retry action. Normalize the Kubes role claim to an array whether DeskID sends a string or an array. Provider listing remains available to viewers; creating or testing credentials requires an organization-scoped editor or admin role.
+- **Verification**: Confirm `/api/providers` succeeds with a string-form viewer role and the existing array-form role remains supported; verify editor/admin-only mutations remain gated. Run the project checks and retest after rebuilding the running application.
+
 ## [DEBUG-001] Global Port Registry Empty Active Services on Status Check
 
 - **Incident ID & Title**: `[DEBUG-001] Global Port Registry Empty Active Services`
@@ -99,3 +126,32 @@
   5. Did not invoke Docker; Compose and PostgreSQL runtime checks are waiting for the user's run.
 - **Resolution & Fix**: No repository workaround was added for the restricted shell. The Go verification passed after using `/tmp`. TypeScript and Compose verification require the user's local Node.js and Docker environment.
 - **Verification**: Go unit tests and `go vet` pass. TypeScript check, Compose config/build, PostgreSQL migration, persistence, DeskID token validation, and provider proxy verification remain incomplete pending local commands.
+
+## [DEBUG-009] Docker Host Port Collision on Agent Core
+
+- **Incident ID & Title**: `[DEBUG-009] Docker Host Port Collision on Agent Core`
+- **Symptoms & Error Messages**: Docker Compose failed to publish host port `8000` for `kubes-agent-core` because another process already held that port.
+- **Root Cause**: Compose used fixed default host ports for Kubes services instead of consistently using the global port allocator.
+- **Diagnostic Steps**:
+  1. Reviewed the Docker daemon error identifying host port `8000` as already allocated.
+  2. Traced Compose defaults and startup scripts; Docker defaults were `3000` and `8000`, while allocator preferences were also the same standard ports.
+- **Resolution & Fix**: Set Kubes preferred host ports to `23000` (web) and `28000` (agent core), updated local/Docker startup to request those ports from `port-alloc`, and registered Docker container PIDs with the allocator. Container-internal ports remain unchanged. Use `./kubes start --docker` or `make start ARGS=--docker` for allocator-managed Docker startup.
+- **Verification**: Shell syntax, Compose YAML parsing, and whitespace checks passed. A smoke check confirmed allocator fallback from an occupied `23000` to `23001` and allocation of agent core within `28000`–`28100`. The allocator pytest suite could not execute its socket-binding tests because this restricted environment denies socket creation (`PermissionError: Operation not permitted`). Docker Compose runtime verification remains pending a local Docker run.
+
+## [DEBUG-010] Provider Verification Failure Had No Diagnostic Log
+
+- **Incident ID & Title**: `[DEBUG-010] Provider Verification Failure Had No Diagnostic Log`
+- **Symptoms & Error Messages**: A saved Gemini credential remained unverified and the UI reported that the provider could not be reached. A container request to the provider's HTTPS root resolved DNS and completed TLS but returned HTTP 404; the credential service logs contained no request-level failure details.
+- **Root Cause**: Provider verification failures were returned to the caller as sanitized categories but were not written to service logs, leaving transport failures and upstream HTTP failures indistinguishable to operators.
+- **Diagnostic Steps**: Confirmed the credential was saved but unverified in the provider modal, checked basic HTTPS reachability from the container, inspected the empty service logs, and traced test errors and HTTP status classification in the credential service.
+- **Resolution & Fix**: Log provider ID, sanitized failure category, upstream HTTP status (zero when no HTTP response was received), and latency for failed provider tests. Never log credentials, response bodies, user identifiers, or raw upstream errors. Gemini's key check now uses `GET /v1beta/openai/models`, returns sanitized model IDs for the local provider model list, and reports key acceptance without claiming chat generation was tested.
+- **Verification**: A focused Go test checks the Gemini models URL, GET method, bearer authentication, and filtering/deduplication of returned IDs. Run `go test ./...` and `go vet ./...` in `services/provider-credentials`, rebuild the provider-credentials container, and test with a saved Gemini key. Confirm the modal receives the model IDs and says chat generation was not tested. This does not establish that actual Gemini generation succeeds.
+
+## [DEBUG-011] Gemini Chat Proxy Returned an Undifferentiated 502
+
+- **Incident ID & Title**: `[DEBUG-011] Gemini Chat Proxy Returned an Undifferentiated 502`
+- **Symptoms & Error Messages**: Chat requests through the provider-credentials proxy returned HTTP 502 with `provider_unavailable`. A previous log recorded only that the provider stream ended, so it did not identify an upstream HTTP status or distinguish connection, timeout, stream-read, and request-cancellation failures.
+- **Root Cause**: The proxy discarded non-success upstream bodies and exposed only a generic error to the caller; its stream-copy warning omitted failure phase and category. The available evidence does not yet establish whether Gemini, the compatibility endpoint, or an intermediary caused the failure.
+- **Diagnostic Steps**: Compare one short plain, non-streaming chat request with one streaming request that enables Kubes tools. Correlate the UI error with the provider service log by timestamp. Do not paste or log API keys, prompts, tool arguments, or raw provider response bodies.
+- **Resolution & Fix**: Add structured warning fields for provider, failure phase, sanitized category, upstream HTTP status (zero when no response arrived), and latency. Transport errors distinguish cancellation, timeout, and connection failure; stream errors distinguish cancellation, timeout, and read failure. Logs intentionally exclude response headers, bodies, credentials, prompts, tool arguments, and user identifiers.
+- **Verification**: Focused tests assert the safe diagnostic fields and category mapping. After rebuilding/restarting the credential service, retry both request shapes. An `upstream_response` log with a nonzero status means Gemini returned an HTTP error; an `upstream_request` log indicates failure before a response; a `response_stream` log indicates a failure while relaying a successful response. The native Gemini adapter decision remains pending those results.

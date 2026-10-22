@@ -54,7 +54,7 @@ if [ -n "${CHROME_BIN}" ]; then
   fi
 
   if [ -z "${ACTIVE_WEB_PORT}" ]; then
-    for P in 3000 3001 3002 3003 3004; do
+    for P in {23000..23100}; do
       if curl -s -f "http://127.0.0.1:${P}/api/models" >/dev/null 2>&1; then
         ACTIVE_WEB_PORT="${P}"
         break

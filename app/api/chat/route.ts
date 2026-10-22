@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     // Client messages are untyped UI messages. The agent stream wants its own
     // tool-part union, which a persisted transcript cannot satisfy statically.
     const uiMessages = body.messages as never;
-    const release = trackCube(cube.id);
+    const release = trackCube(cube.id, auth.orgId);
     let timedOut = false;
     const abortController = new AbortController();
     const abortFromRequest = () => abortController.abort(request.signal.reason);

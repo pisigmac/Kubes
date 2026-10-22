@@ -91,8 +91,8 @@ pnpm run status
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔍 Kubes Stack Status Dashboard
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-web:               🟢 RUNNING (PID 12345) [Port 3000 listening] ✓ Health 200 OK
-agent-core:        🟢 RUNNING (PID 12346) [Port 8000 listening] ✓ Health 200 OK
+web:               🟢 RUNNING (PID 12345) [Port 23000 listening] ✓ Health 200 OK
+agent-core:        🟢 RUNNING (PID 12346) [Port 28000 listening] ✓ Health 200 OK
 scheduler:         🟢 RUNNING (PID 12347)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -102,14 +102,14 @@ scheduler:         🟢 RUNNING (PID 12347)
 bash scripts/start-all.sh --docker
 ```
 
-Open your browser at [http://localhost:3000](http://localhost:3000).
+Open the URL printed by startup (preferred host port: `23000`).
 
 ---
 
 ## 4. UI & Multi-Agent Orchestration Testing
 
 ### Step 4.1: Specialist Roster & Routing
-1. Open the web interface at `http://localhost:3000`.
+1. Open the web interface at the URL printed by startup (preferred host port: `23000`).
 2. Observe the sidebar:
    - **Maestro** (Default Orchestrator at the top).
    - **Specialist Kubes**: Focus, Money, Work, Body, Learn, Write, Life admin, Calm, Job hunt.
@@ -162,7 +162,7 @@ Open your browser at [http://localhost:3000](http://localhost:3000).
 ### Step 6.2: SSRF & Private Network Interception (`computer_browse`)
 1. In chat, ask **Job hunt**:
    ```text
-   Browse the webpage http://127.0.0.1:8000/
+   Browse the webpage http://127.0.0.1:28000/
    ```
 2. **Verification**:
    - The security guard in [`lib/computer/browser.ts`](lib/computer/browser.ts) intercepts the request.
@@ -175,7 +175,7 @@ Open your browser at [http://localhost:3000](http://localhost:3000).
 ### Step 7.1: Agent Core Health Endpoint
 Test the FastAPI LangGraph service directly from your terminal:
 ```bash
-curl -s http://127.0.0.1:8000/health | jq .
+curl -s http://127.0.0.1:28000/health | jq .
 ```
 **Expected Output:**
 ```json
@@ -188,7 +188,7 @@ curl -s http://127.0.0.1:8000/health | jq .
 
 ### Step 7.2: LangGraph State Machine Invocation
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/agent/invoke \
+curl -s -X POST http://127.0.0.1:28000/api/v1/agent/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "cube_slug": "focus",

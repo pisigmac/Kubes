@@ -5,6 +5,8 @@ import {
   type SwarmRunnerEvent,
 } from "../../../lib/cubes/swarm_runner.ts";
 import { type SwarmPlan, validateSwarmPlan } from "../../../lib/cubes/swarm.ts";
+import { listCubes } from "../../../lib/cubes/store.ts";
+import { trackCube } from "../../../lib/cubes/busy.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
     const providerId =
       body.providerId || request.headers.get("x-kubes-provider-id") || undefined;
     const userAccessToken = extractAuthToken(request) || undefined;
+    const maestro = listCubes(auth).find((cube) => cube.isMaestro);
 
     const encoder = new TextEncoder();
 
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode(payload));
         };
 
+        const release = maestro ? trackCube(maestro.id, auth.orgId) : () => {};
         try {
           await executeSwarmPlan({
             plan: targetPlan,
@@ -68,6 +72,7 @@ export async function POST(request: Request) {
           const errorPayload = `data: ${JSON.stringify({ type: "plan_error", error: errorMsg })}\n\n`;
           controller.enqueue(encoder.encode(errorPayload));
         } finally {
+          release();
           controller.close();
         }
       },

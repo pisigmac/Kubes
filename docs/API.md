@@ -6,6 +6,11 @@ All protected API endpoints require either:
 
 When `AUTH_MODE=deskid`, unauthenticated requests receive `HTTP 401 Unauthorized`. Insufficient role permissions return `HTTP 403 Forbidden`.
 
+### DeskID browser session
+- **`POST /api/auth/login`**: Exchanges `{ "email", "password" }` with the configured DeskID `/v1/auth/login` endpoint. Kubes validates the returned access token and stores access and refresh tokens in HttpOnly cookies. Credentials and tokens are never returned to browser JavaScript.
+- **`POST /api/auth/logout`**: Revokes the refresh token with DeskID when possible and clears both Kubes session cookies.
+- Expired browser access tokens are refreshed server-side using DeskID `/v1/auth/refresh`. Failed refresh redirects pages to `/login` and returns 401 for API calls.
+
 ---
 
 ## Endpoint Summary
